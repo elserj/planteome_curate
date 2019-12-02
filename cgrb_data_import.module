@@ -1,0 +1,2823 @@
+<?php
+
+$log_file = "/data/www/planteome_dev/curate/logs/php.log";
+
+/**
+ * @file
+ * A module to pull in initial data for the OSU CGRB site
+ */
+
+ /**
+ * Implements hook_help().
+ *
+ * Displays help and module information.
+ *
+ * @param path 
+ *   Which path of the site we're using to display help
+ * @param arg 
+ *   Array that holds the current path as returned from arg() function
+ */
+function cgrb_data_import_help($path, $arg) {
+  switch ($path) {
+    case "admin/help#cgrb_data_import":
+      return t("Initial data population for CGRB site."); 
+      break; 
+  }
+}
+
+ /**
+ * Implements hook_menu().
+ *
+ */
+function cgrb_data_import_menu() {
+	$items['importowl'] = array(
+		'title'				=> 'Import OWL data from URL',
+	  	'page callback'		=> 'drupal_get_form',
+	  	'page arguments'	=> array('owl_import_form'),
+	  	'access callback' 	=> 'access_function',);
+  	$items['importgene'] = array(
+		'title'				=> 'Import gene data from TSV files',
+	  	'page callback'		=> 'drupal_get_form',
+	  	'page arguments'	=> array('gene_import_form'),
+	  	'access callback' 	=> 'access_function',);
+  	$items['autocomplete/species'] = array(
+	  	'page callback'		=> 'autocomplete_species',
+	  	'type'				=> MENU_CALLBACK,
+	  	'access callback' 	=> 'access_function',);
+  	$items['autocomplete/sources'] = array(
+	  	'page callback'		=> 'autocomplete_sources',
+	  	'type'				=> MENU_CALLBACK,
+	  	'access callback' 	=> 'access_function',);
+  	$items['autocomplete/genes'] = array(
+	  	'page callback'		=> 'autocomplete_genes',
+	  	'type'				=> MENU_CALLBACK,
+	  	'access callback' 	=> 'access_function',);
+  	$items['autocomplete/aspect'] = array(
+	  	'page callback'		=> 'autocomplete_aspect',
+	  	'type'				=> MENU_CALLBACK,
+	  	'access callback' 	=> 'access_function',);
+  	$items['autocomplete/ontology_term'] = array(
+	  	'page callback'		=> 'autocomplete_ontology_term',
+	  	'type'				=> MENU_CALLBACK,
+	  	'access callback' 	=> 'access_function',);
+  	$items['autocomplete/ontology_term_extended'] = array(
+	  	'page callback'		=> 'autocomplete_ontology_term_extended',
+	  	'type'				=> MENU_CALLBACK,
+	  	'access callback' 	=> 'access_function',);
+  	$items['autocomplete/evidence_code'] = array(
+	  	'page callback'		=> 'autocomplete_evidence_code',
+	  	'type'				=> MENU_CALLBACK,
+	  	'access callback' 	=> 'access_function',);
+	$items['importgaf'] = array(
+	 	'title'				=> 'Import GAF data',
+	 	'page callback'		=> 'drupal_get_form',
+	 	'page arguments'	=> array('gaf_import_form'),
+	 	'access callback'	=> 'access_function',);
+	$items['updatesources'] = array(
+		'title'				=> 'Update source data',
+		'page callback'		=> 'drupal_get_form',
+		'page arguments'	=> array('update_sources_form'),
+		'access callback'	=> 'access_function',);
+	$items['exportgaf'] = array(
+		'title'				=> 'Export selected annotations to a gaf file',
+		'page callback'		=> 'drupal_get_form',
+	 	'page arguments'	=> array('gaf_export_form'),
+	 	'access callback'	=> 'access_function',);
+	$items['browse_annotations'] = array(
+		'title'				=> 'Annotations',
+		'page callback'		=> 'browse_annotation_page',
+		'type'				=> MENU_NORMAL_ITEM,
+		'access callback'	=> 'access_function',);
+	$items['clear_malformed_genes'] = array(
+		'title'				=> 'Clear Malformed Genes',
+		'page callback'		=> 'drupal_get_form',
+		'page arguments'	=> array('clear_malformed_genes_form'),
+		'access callback'	=> 'access_function',);
+	$items['translate_gaf_id'] = array(
+		'title'				=> 'Translate GAF file ID',
+		'page callback'		=> 'drupal_get_form',
+		'page arguments'	=> array('translate_gaf_id_form'),
+		'access callback'	=> 'access_function',);
+	$items['add_gene_synonyms'] = array(
+		'title'				=> 'Add Gene Synonyms',
+		'page callback'		=> 'drupal_get_form',
+		'page arguments'	=> array('add_gene_synonyms_form'),
+		'access callback'	=> 'access_function',);
+	$items['update_gene_counts'] = [
+		'title'				=> 'Update Taxon Gene Counts',
+		'page callback'		=> 'drupal_get_form',
+		'page arguments'	=> ['update_gene_counts_form'],
+		'access callback'	=> 'access_function',];
+	$items['update_gene_ontology_terms'] = [
+		'title'				=> 'Update Gene Ontology term lists',
+		'page callback'		=> 'drupal_get_form',
+		'page arguments'	=> ['update_gene_ontology_terms_form'],
+		'access callback'	=> 'access_function',];
+  	return $items;
+}
+
+/*************ANNOTATION VIEWER*************/
+function browse_annotation_page(){
+	$filter_form = drupal_get_form('filter_annotation_form');
+	$browse_form = drupal_get_form('browse_annotation_form');
+	// $ecodes = taxonomy_vocabulary_machine_name_load('evidence_code');
+	// $ecodes_array = taxonomy_get_tree($ecodes->vid);
+	// $ecodes_legend = '<div style="display: inline-block;float:left;"><h3>Evidence Code Key</h3><ul>';
+	// foreach($ecodes_array as $ecode){
+	// 	$ecodes_legend.= '<li>'.$ecode->name.'</li>';
+	// }
+	// $ecodes_legend.= '</ul></div>';
+	$output = '';
+	// $output.= $ecodes_legend;
+	$output.= drupal_render($filter_form);
+	$output.= drupal_render($browse_form);
+	return $output;
+}
+
+function filter_annotation_form($form, &$form_state){
+	$form['#method'] = 'get';
+	$form['filters'] = array(
+		'#type'		=> 'fieldset',
+		'#title'	=> t('Show annotations matching the following criteria:'),
+		'#attributes'=> array(
+			'style'	=> 'display: inline-block;'
+		),
+	);
+	$form['filters']['aspect'] = array(
+		'#type'				=> 'select',
+		'#title'			=> 'Aspect is:',
+		'#options'			=> taxonomy_to_select_array('aspect'),
+		'#default_value'	=> (isset($_GET['aspect']) ? urldecode($_GET['aspect']) : ''),
+	);
+	$form['filters']['species'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Species is:',
+		'#autocomplete_path'=> 'autocomplete/species',
+		'#default_value'	=> (isset($_GET['species']) ? urldecode($_GET['species']) : ''),
+	);
+	$form['filters']['gene'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Gene is:',
+		'#autocomplete_path'=> 'autocomplete/genes',
+		'#default_value'	=> (isset($_GET['gene']) ? urldecode($_GET['gene']) : ''),
+
+	);
+	$form['filters']['ontology_term'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Ontology term is:',
+		'#autocomplete_path'=> 'autocomplete/ontology_term',
+		'#default_value'	=> (isset($_GET['ontology_term']) ? urldecode($_GET['ontology_term']) : ''),
+
+	);
+	// $form['filters']['data_source'] = array(
+	// 	'#type'				=> 'textfield',
+	// 	'#title'			=> 'Data Source is:',
+	// 	'#autocomplete_path'=> 'autocomplete/sources',
+	// 	'#default_value'	=> (isset($_GET['data_source']) ? urldecode($_GET['data_source']) : ''),
+
+	// );
+	$form['filters']['evidence_code'] = array(
+		'#type'				=> 'select',
+		// '#multiple'			=> TRUE,
+		'#title'			=> 'Evidence code is one of:',
+		'#options'			=> array_merge(array(''=>''),(taxonomy_to_select_array('evidence_code'))),
+		'#default'			=> (isset($_GET['evidence_code']) ? urldecode($_GET['evidence_code']) : ''),
+	);
+	$form['filters']['submit'] = array(
+		'#type' => 'submit',
+		'#value' => t('Filter'),
+		'#prefix' => '<span style="display:block;">',
+    	'#suffix' => '</span>',
+	);
+
+	return $form;
+}
+
+function browse_annotation_form($form, &$form_state){
+	global $pager_total_items;
+	$num_items = (int)$pager_total_items[0];
+	drupal_set_message('Currently applied filters give '.$num_items.' results. Please filter until there are '.variable_get('export_gaf_annotation_limit').' items or less. If you need to export more than '.variable_get('export_gaf_annotation_limit').' items, please contact a system administrator.');
+	$header = array(
+		t('Annotation Accession'),
+		[
+			'data' => t('Aspect'),
+	        'type' => 'field',
+	        'specifier' => array('field' => 'field_aspect', 'column' => 'tid'),
+		],
+		// t('Aspect'),
+		[
+			'data' => t('Ontology ID Term'),
+	        'type' => 'field',
+	        'specifier' => array('field' => 'field_ontology_id', 'column' => 'value'),
+		],
+		// t('Ontology ID Term'),
+		[
+			'data' => t('Species'),
+	        'type' => 'field',
+	        'specifier' => array('field' => 'field_ontology_id', 'column' => 'value'),
+		],
+		// t('Species'),
+		[
+			'data' => t('Gene'),
+	        'type' => 'field',
+	        'specifier' => array('field' => 'field_gene', 'column' => 'target_id'),
+		],
+		// t('Gene'),
+		// t('Data Source Name'),
+		[
+			'data' => t('Evidence Code'),
+	        'type' => 'field',
+	        'specifier' => array('field' => 'field_evidence_code', 'column' => 'tid'),
+		],
+		// t('Evidence Code')
+	);
+
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type','node')
+		->entityCondition('bundle', 'annotation');
+	if(isset($_GET['gene']) && !empty($_GET['gene'])){
+		$q = new EntityFieldQuery();
+		$q->entityCondition('entity_type','node')
+			->entityCondition('bundle', 'gene')
+			->propertyCondition('title',$_GET['gene']);
+		$r = $q->execute();
+		if (!empty($r['node'])) {
+			$arrkeys = array_keys($r['node']);
+			$key = array_shift($arrkeys);
+		    $gene = node_load($key);
+		    $query->fieldCondition('field_gene','target_id',$gene->nid,'=');
+		}
+	}
+	if(isset($_GET['species']) && !empty($_GET['species'])){
+		$q = new EntityFieldQuery();
+		$q->entityCondition('entity_type','node')
+			->entityCondition('bundle', 'taxon')
+			->propertyCondition('title',$_GET['species']);
+		$r = $q->execute();
+		if (!empty($r['node'])) {
+			$arrkeys = array_keys($r['node']);
+			$key = array_shift($arrkeys);
+		    $species = node_load($key);
+		    $query->fieldCondition('field_ref_species','target_id',$species->nid,'=');
+		}
+	}
+	if(isset($_GET['aspect']) && !empty($_GET['aspect'])){
+		$term = taxonomy_term_load($_GET['aspect']);
+		$query->fieldCondition('field_aspect','tid',$term->tid,'=');
+	}
+	if(isset($_GET['evidence_code']) && !empty($_GET['evidence_code'])){
+		$term = taxonomy_term_load($_GET['evidence_code']);
+		$query->fieldCondition('field_evidence_code','tid',$term->tid,'=');
+	}
+	if(isset($_GET['ontology_term']) && !empty($_GET['ontology_term'])){
+		$query->fieldCondition('field_ontology_id','value', get_ontology_id_from_term($_GET['ontology_term']),'=');
+	}
+	/*if(isset($_GET['data_source']) && !empty($_GET['data_source'])){
+		$ttl = taxonomy_get_term_by_name($_GET['data_source']);
+		$ttl2 = array_shift($ttl);
+		$q = new EntityFieldQuery();
+		$r = $q->entityCondition('entity_type', 'field_collection_item')
+			->propertyCondition('field_name','field_data_source')
+			->fieldCondition('field_source_name', 'tid', $ttl2->tid, '=')
+			->execute();
+		if(empty($r)){
+			$query->fieldCondition('field_data_source','value', $_GET['data_source']);
+		} else {
+			$keys = array_keys($r['field_collection_item']);
+			$query->fieldCondition('field_data_source','value', $keys);
+		}
+	}*/
+	$query = $query->tableSort($header);
+	$query->pager(50)->propertyOrderBy('title', 'DESC');
+	$results = $query->execute();
+	$num_items = count($results['node']);
+
+	$rows = array();
+	global $user;
+	if(!empty($results['node'])){
+		foreach($results['node'] as $result){
+			$annotation = node_load($result->nid);
+			$species = node_load($annotation->field_ref_species[$annotation->language][0]['target_id']);
+			$gene = node_load($annotation->field_gene[$annotation->language][0]['target_id']);
+			$aspect = taxonomy_term_load($annotation->field_aspect[$annotation->language][0]['tid']);
+			$evidence = taxonomy_term_load($annotation->field_evidence_code[$annotation->language][0]['tid']);
+
+			$data_source_fc_id = $annotation->field_data_source[$annotation->language][0]['value'];
+			$data_source = entity_load('field_collection_item', array($data_source_fc_id));
+			$source_term = taxonomy_term_load($data_source[$data_source_fc_id]->field_source_name[$annotation->language][0]['tid']);
+			$db = $source_term->field_machine_name['und'][0]['value'];
+
+			$rows[$annotation->title] = array(
+				'<a href="/osu-cgrb/website/content/'.$annotation->title.'">'.$annotation->title.'</a>',
+				$aspect->name,
+				'<a href="http://browser.planteome.org/amigo/term/'.$annotation->field_ontology_id[$annotation->language][0]['value'].'">'.$annotation->field_ontology_id[$annotation->language][0]['value'].' - '.get_ontology_term_from_id($annotation->field_ontology_id[$annotation->language][0]['value']).'</a>',
+				'<a href="/osu-cgrb/website/node/'.$species->nid.'">'.$species->title.'</a>',
+				'<a href="/osu-cgrb/website/node/'.$gene->nid.'">'.$gene->field_gene_id[$gene->language][0]['value'].'</a>',
+				$db,
+				$evidence->field_machine_name[$annotation->language][0]['value'],			
+			);
+		}
+	}
+
+	$form['tableselect'] = array(
+		'#type' => 'tableselect',
+	    '#header' => $header,
+	    '#options' => $rows,
+	    '#empty' => t('No Records found'),
+	);
+
+	$form['num_items'] = [
+		'#type' => 'textfield',
+		'#access' => FALSE,
+		'#default_value' => $num_items,
+	];
+
+	$form['pager'] = array('#markup' => theme('pager'));
+
+	$form['gaf_notes'] = [
+		'#title' => t('Add a note to the exported GAF file. (GAF version & current date added automatically)'),
+		'#type' => 'textarea',
+	];
+
+	$form['submit_selected'] = array(
+	    '#type' => 'submit',
+		'#value' => t('Export Selected'),
+		'#submit' => array('browse_annotation_form_submit_selected'),
+		'#disabled' => true,
+	);
+	$form['submit_all'] = array(
+	    '#type' => 'submit',
+		'#value' => t('Export All (matching criteria)'),
+		'#submit' => array('browse_annotation_form_submit_all')
+	);
+	$form['#attached']['js'] = array(
+	  drupal_get_path('module', 'cgrb_data_import') . '/cgrb_data_import.js',
+	);
+	// drupal_add_js(drupal_get_path('module', 'cgrb_data_import') . '/cgrb_data_import.js');
+	return $form;
+}
+
+function browse_annotation_form_validate($form, &$form_state){
+	$results = array_filter($form_state['values']['tableselect']);
+	global $pager_total_items;
+	$num_items = (int)$pager_total_items[0];
+	if($num_items > variable_get('export_gaf_annotation_limit')){
+		form_set_error('tableselect', "Currently there are ".$num_items." annotations that match the filter criteria.\nUnable to export more than ".variable_get('export_gaf_annotation_limit')." annotations at a time with this method.\nPlease filter your query further.");
+	}
+
+	// echo'<pre>';var_dump($num_items);exit;
+
+}
+
+function browse_annotation_form_submit_selected($form, &$form_state){
+	$results = array_filter($form_state['values']['tableselect']);
+	// echo(count($results));exit;
+	$gaf_data = "!gaf-version: 2.0\n!date: ".date("Y/m/d")."\n";
+	// $gaf_data.= variable_get('export_gaf_header_value')
+	$gaf_data.= format_gaf_text(variable_get('export_gaf_header_value'));
+	$gaf_data.= format_gaf_text($form_state['values']['gaf_notes']);
+	$gaf_data.= "!DB\tDB Object ID\tDB Object Symbol\tQualifier\tGO ID\tDB:Reference\tEvidence Code\tWith (or) From\tAspect\tDB Object Name\tDB Object Synonym\tDB Object Type\tTaxon\tDate\tAssigned By\tAnnotation Extension\tGene Product Form ID\n";
+	// echo '<pre>'.$gaf_data;exit;
+	// echo'<pre>';var_dump('ye');exit;
+	foreach($results as $ann_acc){
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type','node')
+			->entityCondition('bundle', 'annotation')
+			->propertyCondition('title',$ann_acc);
+		$results = $query->execute();
+		if(count($results['node'])){
+			$annotation = array_pop(array_reverse($results['node']));
+			$gaf_data .= annotation_to_gaf_line($annotation->nid);
+		}
+	}
+	$filename = 'planteome_gaf_'.format_date(time(), 'custom', 'YMdHi').'.assoc';
+	$file = file_save_data($gaf_data, 'public://'.$filename);
+	// echo'<pre>';
+	// echo(file_get_contents($file->uri));
+	// echo'<pre>';var_dump($file);exit;
+	header('Content-Description: File Transfer');
+    header('Content-Type: '.$file->filemime);
+    header('Content-Disposition: attachment; filename="'.$file->filename.'"');
+    header('Expires: 0');
+    header('Cache-Control: must-revalidate');
+    header('Pragma: public');
+    header('Content-Length: '.$file->filesize);
+    readfile($file->uri);
+    // exit;
+	
+	file_delete($file);
+	exit;
+	// $file = file_save_data($gaf_data, 'public://'.$filename);
+	// echo'<pre>';
+	// echo(file_get_contents($file->uri));
+	// file_delete($file);
+	// exit;
+	// echo'<pre>';var_dump($results);exit;
+}
+
+function format_gaf_text($text){
+	$lines_array = explode("\n", $text);
+	$out = '';
+	// echo'<pre>';var_dump($lines_array);exit;
+	foreach($lines_array as $line){
+		$out.= "!".$line."\n";
+	}
+	return $out;
+}
+
+//TODO 2 - Lakshit
+//will need a batch process
+function browse_annotation_form_submit_all($form, &$form_state){
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type','node')
+		->entityCondition('bundle', 'annotation');
+	if(isset($_GET['gene']) && !empty($_GET['gene'])){
+		$q = new EntityFieldQuery();
+		$q->entityCondition('entity_type','node')
+			->entityCondition('bundle', 'gene')
+			->propertyCondition('title',$_GET['gene']);
+		$r = $q->execute();
+		if (!empty($r['node'])) {
+			$arrkeys = array_keys($r['node']);
+			$key = array_shift($arrkeys);
+		    $gene = node_load($key);
+		    $query->fieldCondition('field_gene','target_id',$gene->nid,'=');
+		}
+	}
+	if(isset($_GET['species']) && !empty($_GET['species'])){
+		$q = new EntityFieldQuery();
+		$q->entityCondition('entity_type','node')
+			->entityCondition('bundle', 'taxon')
+			->propertyCondition('title',$_GET['species']);
+		$r = $q->execute();
+		if (!empty($r['node'])) {
+			$arrkeys = array_keys($r['node']);
+			$key = array_shift($arrkeys);
+		    $species = node_load($key);
+		    $query->fieldCondition('field_ref_species','target_id',$species->nid,'=');
+		}
+	}
+	if(isset($_GET['aspect']) && !empty($_GET['aspect'])){
+		$term = taxonomy_term_load($_GET['aspect']);
+		$query->fieldCondition('field_aspect','tid',$term->tid,'=');
+	}
+	if(isset($_GET['evidence_code']) && !empty($_GET['evidence_code'])){
+		$term = taxonomy_term_load($_GET['evidence_code']);
+		$query->fieldCondition('field_evidence_code','tid',$term->tid,'=');
+	}
+
+	$results = $query->execute();
+
+	$gaf_data = "!gaf-version: 2.0\n!date: ".date("Y/m/d")."\n";
+	// $gaf_data.= variable_get('export_gaf_header_value')
+	$gaf_data.= format_gaf_text(variable_get('export_gaf_header_value'));
+	$gaf_data.= format_gaf_text($form_state['values']['gaf_notes']);
+	$gaf_data.= "!DB\tDB Object ID\tDB Object Symbol\tQualifier\tGO ID\tDB:Reference\tEvidence Code\tWith (or) From\tAspect\tDB Object Name\tDB Object Synonym\tDB Object Type\tTaxon\tDate\tAssigned By\tAnnotation Extension\tGene Product Form ID\n";
+	if(array_key_exists('node',$results)){
+		foreach($results['node'] as $annotation){
+			$gaf_data .= annotation_to_gaf_line($annotation->nid);
+		}
+		$filename = 'planteome_gaf_'.format_date(time(), 'custom', 'YMdHi').'.assoc';
+		$file = file_save_data($gaf_data, 'public://'.$filename);
+		// echo'<pre>';
+		// echo(file_get_contents($file->uri));
+		// echo'<pre>';var_dump($file);exit;
+		header('Content-Description: File Transfer');
+	    header('Content-Type: '.$file->filemime);
+	    header('Content-Disposition: attachment; filename="'.$file->filename.'"');
+	    header('Expires: 0');
+	    header('Cache-Control: must-revalidate');
+	    header('Pragma: public');
+	    header('Content-Length: '.$file->filesize);
+	    readfile($file->uri);
+	    // exit;
+		
+		file_delete($file);
+		exit;
+	}
+	// echo'<pre>';var_dump($results);exit;
+}
+
+/*************OWL FORM*************/
+ /**
+ * Implements hook_form().
+ *
+ * Creates a form .
+ *
+ * @param form 
+ *   The form we're working with
+ * @param &form_state 
+ *   Reference to the state of the form
+ */
+function owl_import_form($form, &$form_state){
+	$form['input'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Enter OWL url',
+		'#required'			=> TRUE,
+	);
+	$form['submit'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('Submit'),
+	);
+	return $form;
+}
+
+function owl_import_form_validate($form, &$form_state){}
+
+function owl_import_form_submit($form, &$form_state){
+	$url = $form_state['values']['input'];
+	$bio_tree = get_children(1,(parse_owl($url)));
+	iterate($bio_tree);
+}
+
+/*************GENE IMPORT FORM*************/
+ /**
+ * Implements hook_form().
+ *
+ * Creates a form .
+ *
+ * @param form 
+ *   The form we're working with
+ * @param &form_state 
+ *   Reference to the state of the form
+ */
+function gene_import_form($form, &$form_state){
+	//phpinfo();
+
+	$form['gene_file'] = array(
+	    '#type' => 'file',
+	    '#title' => t('Upload gene file'),
+	);
+	$form['gene_file_alt'] = array(
+		'#type' => 'checkbox',
+		'#title' => t('Use alternative file parser? (for files from UNIX/Mac OS X+)'),
+	);
+	$form['alias_file'] = array(
+	    '#type' => 'file',
+	    '#title' => t('Upload alias file'),
+	);
+	$form['alias_file_alt'] = array(
+		'#type' => 'checkbox',
+		'#title' => t('Use alternative file parser? (for files from UNIX/Mac OS X+)'),
+	);
+	$form['data'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Enter species.',
+		'#required'			=> TRUE,
+		'#autocomplete_path'=> 'autocomplete/species',
+	);
+	$form['source'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Enter source.',
+		'#required'			=> TRUE,
+		'#autocomplete_path'=> 'autocomplete/sources',
+	);
+	$form['submit'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('Submit'),
+	);
+	return $form;
+}
+
+function gene_import_form_validate($form, &$form_state){}
+
+function gene_import_form_submit($form, &$form_state){
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type','node')
+		->entityCondition('bundle','taxon')
+		->propertyCondition('type',array('taxon'))
+		->propertyCondition('title', $form_state['values']['data']);
+		//this will be updated when we change the context, and can likely be moved outside the batch process altogether
+	$results = $query->execute();
+	
+	$species_nid = array_keys($results['node'])[0];
+	$source_name = $form_state['values']['source'];
+
+	if(db_table_exists('tmptable')){
+		db_drop_table('tmptable');
+	}
+	//TODO 3- Lakshit
+	//	   - add a new form to reset the accession table
+	//	   - this should require a password
+	/*if(db_table_exists('accession')){
+		db_drop_table('accession');
+		exit('accession dropped');
+	}*/
+
+
+	if(db_table_exists('accession') == FALSE){
+		$schema = array(
+		    'description' => 'Table to track accession incrementation',
+		    'fields' => array(
+		    	'accession' => array(
+		        	'type' => 'int',
+		        	'not null' => TRUE,
+		        	'description' => 'Primary Key: Unique aggregator static media asset ID.'),),
+		    'primary key' => array('accession'),
+		  );
+		db_create_table('accession',$schema);
+		db_insert('accession')
+		->fields(array(
+			'accession' 	=> 1,
+			))
+		->execute();
+	}
+    $file1 = file_save_upload('gene_file', array(
+        'file_validate_extensions' => array('txt'),
+    ));
+    $file2 = file_save_upload('alias_file', array(
+        'file_validate_extensions' => array('txt'),
+    ));
+
+    //get the content in the file
+    $content1 = file_get_contents($file1->uri);
+    $content2 = file_get_contents($file2->uri);
+
+    //remove the file in temp and the pointer in the database
+    file_delete($file1);
+    file_delete($file2);
+
+    if($form_state['values']['gene_file_alt']){
+    	//use UNIX/MACOSX \n
+    	$arr1 = tabbed_file_to_array_alt($content1);
+    } else {
+    	//use windows \r\n
+    	$arr1 = tabbed_file_to_array($content1);
+    }
+
+    if($form_state['values']['alias_file_alt']){
+    	//use UNIX/MACOSX \n
+    	$arr2 = tabbed_file_to_array_alt($content2);
+    } else {
+    	//use windows \r\n
+    	$arr2 = tabbed_file_to_array($content2);
+    }
+    $chunks1 = array_chunk($arr1, 100);
+    $chunks2 = array_chunk($arr2, 100);
+
+    if(db_table_exists('tmptable') == FALSE){
+		$schema = array(
+		    'description' => 'tmp table',
+		    'fields' => array(
+		    	'pid' => array(
+		        	'type' => 'serial',
+		        	'not null' => TRUE,
+		        	'description' => 'Primary Key: Unique aggregator static media asset ID.'),
+		      	'gene_stable_id' => array(
+		        	'type' => 'varchar',
+		        	'length' => 255,
+		        	'not null' => TRUE,
+		        	'default' => '',),
+		      	'gene_symbol' => array(
+		        	'type' => 'varchar',
+		        	'length' => 255,
+		        	'not null' => FALSE,
+		        	'default' => '',),
+		      	'gene_name' => array(
+		        	'type' => 'varchar',
+		        	'length' => 255,
+		        	'not null' => FALSE,),),
+		    'primary key' => array('pid'),
+		  );
+		db_create_table('tmptable',$schema);
+		
+	}
+
+	$operations = array();
+    foreach($chunks2 as $chunk2){
+    	$operations[] = array('insert_gene_aliases', array($chunk2));
+    }
+    foreach($chunks1 as $chunk1){
+    	$operations[] = array('import_gene_data_to_node', array($chunk1, $species_nid, $source_name));
+    }
+
+    $batch = array(
+    	'operations'		=> $operations,
+    	'finished'			=> 'biomart_process_finished',
+    	'title'				=> t('processing biomart gene batch'),
+    	'init_message'		=> t('starting biomart batch process'),
+    	'progress_message'	=> t('processed @current out of @total')
+   	);
+   	batch_set($batch);
+}
+
+/*************GAF FORM*************/
+ /**
+ * Implements hook_form().
+ *
+ * Creates a form .
+ *
+ * @param form 
+ *   The form we're working with
+ * @param &form_state 
+ *   Reference to the state of the form
+ */
+function gaf_import_form($form, &$form_state){
+	$form['gaf_file'] = array(
+	    '#type' => 'file',
+	    '#title' => t('Upload gaf file'),
+	);
+	$form['id_syntax'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Enter the syntax for gene ID present in the uploaded annotation file, using # to represent a number. Example: AT#G#####',
+		'#required'			=> TRUE,
+	);
+	$form['gaf_url'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Enter URL.',
+	);
+	$form['submit'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('Submit'),
+	);
+	return $form;
+}
+
+function gaf_import_form_validate($form, &$form_state){}
+
+function gaf_import_form_submit($form, &$form_state){
+
+	//TODO 4 - Lakshit
+	//		 - see TODO 3
+	// if(db_table_exists('annotation_accession')){
+	// 	db_drop_table('annotation_accession');
+	// 	exit('annotation_accession dropped');
+	// }
+	if(db_table_exists('annotation_accession') == FALSE){
+		$schema = array(
+		    'description' => 'Table to track annotation accession incrementation',
+		    'fields' => array(
+		    	'accession' => array(
+		        	'type' => 'int',
+		        	'not null' => TRUE,
+		        	'description' => 'Primary Key'),),
+		    'primary key' => array('accession'),
+		  );
+		db_create_table('annotation_accession',$schema);
+		db_insert('annotation_accession')
+		->fields(array(
+			'accession' => 1,
+			))
+		->execute();
+	}
+
+	$file = file_save_upload('gaf_file', array(
+        'file_validate_extensions' => array('assoc'),
+    ));
+    $content = file_get_contents($file->uri);
+    file_delete($file);
+
+    $chunk_amount = 50;
+    $gaf_rows = explode("\n", $content);
+    $chunks = array_chunk($gaf_rows, $chunk_amount);
+    $id_syntax = $form_state['values']['id_syntax'];
+    $operations = array();
+    foreach($chunks as $chunk){
+    	$operations[] = array('import_annotation_to_node', array($chunk,$id_syntax));
+    }
+
+    $batch = array(
+    	'operations'		=> $operations,
+    	'finished'			=> 'gaf_process_finished',
+    	'title'				=> t('processing gene annotation batch'),
+    	'init_message'		=> t('starting gaf batch process'),
+    	'progress_message'	=> t('processed @current out of @total')
+   	);
+
+   	batch_set($batch);
+}
+
+/*************GAF EXPORT FORM*************/
+ /**
+ * Implements hook_form().
+ *
+ * Creates a form .
+ *
+ * @param form 
+ *   The form we're working with
+ * @param &form_state 
+ *   Reference to the state of the form
+ */
+function gaf_export_form($form, &$form_state){
+	$form['text'] = array(
+		'#type'	=> 'textfield',
+		'#title'=> t('title'),
+	);
+	$form['submit'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('submit'),
+	);
+	return $form;
+}
+
+function gaf_export_form_validate($form, &$form_state){
+
+}
+
+//TODO 5 - Lakshit
+//		 - Please verify that this is working correctly with a batch process
+function gaf_export_form_submit($form, &$form_state){
+	$annotation_ids = explode("|",$form_state['values']['text']);
+	$gaf_data = "!gaf-version: 2.0\n!This data in GAF 2.0 format is provided by the NSF-funded Planteome project (www.planteome.org).\n!Date: ".date("Y/m/d");
+	//foreach version
+	foreach($annotation_ids as $annotation_id){
+		$gaf_data .= annotation_to_gaf_line($annotation_id);
+	}
+	$filename = 'planteome_gaf_'.format_date(time(), 'custom', 'YMdHi').'.assoc';
+	//exit($filename);
+	//file_put_contents($filename, $gaf_data);exit;
+
+	$file = file_save_data($gaf_data, 'public://'.$filename);
+	echo'<pre>';/*var_dump($file);echo'<br><br>';*/echo(file_get_contents($file->uri));file_delete($file);exit;
+
+	//might need to uncomment the pre to print nicely
+	// echo'<pre>';echo $gaf_data;var_dump($gaf_data);exit;
+
+	//batch version
+    // $chunks = array_chunk($annotation_ids, 40);
+    // //echo '<pre>';var_dump($chunks);exit;
+    // //$id_syntax = $form_state['values']['id_syntax'];
+
+    // $operations = array();
+    // foreach($chunks as $chunk){
+    // 	$operations[] = array('export', array($chunk));
+    // }
+
+    // $batch = array(
+    // 	'operations'		=> $operations,
+    // 	'finished'			=> 'gaf_process_finished',
+    // 	'title'				=> t('processing gene annotation batch'),
+    // 	'init_message'		=> t('starting gaf batch process'),
+    // 	'progress_message'	=> t('processed @current out of @total')
+   	// );
+
+   	// //echo '<pre>';var_dump($batch);exit;
+
+   	// batch_set($batch);
+}
+
+/*************SOURCES FORM*************/
+ /**
+ * Implements hook_form().
+ *
+ * Creates a form .
+ *
+ * @param form 
+ *   The form we're working with
+ * @param &form_state 
+ *   Reference to the state of the form
+ */
+function update_sources_form($form, &$form_state){
+	$form['submit'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('Click to run the source update script.'),
+	);
+	return $form;
+}
+
+function update_sources_form_validate($form, &$form_state){
+
+}
+
+function update_sources_form_submit($form, &$form_state){
+	update_sources();
+	drupal_set_message(t('Sources have been updated.'));
+}
+
+/*************GENE COUNT FORM*************/
+function update_gene_counts_form($form, &$form_state){
+	$form['submit'] = [
+		'#type'	=> 'submit',
+		'#value' => t('Click to run the gene count update script'),
+	];
+	return $form;
+}
+
+function update_gene_counts_form_validate($form, &$form_state){
+}
+
+function update_gene_counts_form_submit($form, &$form_state){
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type', 'node')
+		->entityCondition('bundle', 'taxon')
+		->propertyCondition('type', ['taxon']);
+	$results = $query->execute();
+	// echo'<pre>';var_dump($results);exit;
+
+	$chunks = array_chunk($results['node'], 50);
+
+	$operations = [];
+	foreach($chunks as $chunk){
+		$operations[] = ['update_taxon_gene_count', [$chunk]];
+	}
+
+	$batch = [
+		'operations'	=> $operations,
+		'finished'		=> 'batch_update_finished',
+		'title'			=> t('processing gene count update'),
+		'title'			=> t('starting taxon gene count update process'),
+		'title'			=> t('processed @current out of @total')
+	];
+
+	batch_set($batch);
+	// echo'<pre>';var_dump($results);exit;
+}
+
+function update_taxon_gene_count($chunk, &$context){
+	foreach($chunk as $taxon){
+		$taxon = node_load($taxon->nid);
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type', 'node')
+			->entityCondition('bundle', 'gene')
+			->fieldCondition('field_ref_species', 'target_id', $taxon->nid, '=');
+			// ->propertyCondition('type', 'gene');
+		$results = $query->execute();
+		$taxon->field_gene_count[$taxon->language][0]['value'] = count($results['node']);
+		node_save($taxon);
+
+		// echo'<pre>';var_dump($taxon);exit;
+		/*if(isset($results['node']) && count($results['node']) > 3){
+			echo'<pre>';var_dump($taxon->title);var_dump($results['node']);exit;
+		}*/
+	}
+}
+
+function batch_update_finished($success, $results, $operations) {
+  //Let the user know we have finished!
+  print t('Finished updating!');
+}
+
+/*************GENE COUNT FORM*************/
+function update_gene_ontology_terms_form($form, &$form_state){
+	$form['submit'] = [
+		'#type'	=> 'submit',
+		'#value' => t('Click to run the gene ontology term update script'),
+	];
+	return $form;
+}
+
+function update_gene_ontology_terms_form_validate($form, &$form_state){
+}
+
+function update_gene_ontology_terms_form_submit($form, &$form_state){
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type', 'node')
+		->entityCondition('bundle', 'gene')
+		->propertyCondition('type', ['gene']);
+	$results = $query->execute();
+	// echo'<pre>';var_dump($results);exit;
+
+	$chunks = array_chunk($results['node'], 50);
+
+	$operations = [];
+	foreach($chunks as $chunk){
+		$operations[] = ['update_gene_ontology_terms', [$chunk]];
+	}
+
+	$batch = [
+		'operations'	=> $operations,
+		'finished'		=> 'batch_update_finished',
+		'title'			=> t('processing gene ontology terms update'),
+		'title'			=> t('starting gene ontology terms update process'),
+		'title'			=> t('processed @current out of @total')
+	];
+
+	batch_set($batch);
+	// echo'<pre>';var_dump($results);exit;
+}
+
+function update_gene_ontology_terms($chunk, &$context){
+	foreach($chunk as $gene){
+		$gene = node_load($gene->nid);
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type', 'node')
+			->entityCondition('bundle', 'annotation')
+			->fieldCondition('field_gene', 'target_id', $gene->nid, '=');
+		$results = $query->execute();
+		if(isset($results['node'])){
+			// echo'<pre>';var_dump($results['node']);exit;
+			$ontology_terms = '';
+			foreach($results['node'] as $result){
+				$annotation = node_load($result->nid);
+				$term = $annotation->field_ontology_id['und'][0]['value'];
+				if($ontology_terms == ''){
+					$ontology_terms.= $term;
+				} else {
+					$pos = strpos($ontology_terms, $term);
+					if($pos === false){
+						//not found
+						$ontology_terms.= ','.$term;
+					}
+				}
+				// echo'<pre>';var_dump($term);exit;
+			}
+
+			if($ontology_terms != ''){
+				$gene->field_gene_ontology_terms[$gene->language][0]['value'] = $ontology_terms;
+				// echo'<pre>';var_dump($gene);exit;
+				node_save($gene);
+			}
+			// echo'<pre>';var_dump($ontology_terms);exit;
+		}
+	}
+	/*foreach($chunk as $taxon){
+		$taxon = node_load($taxon->nid);
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type', 'node')
+			->entityCondition('bundle', 'gene')
+			->fieldCondition('field_ref_species', 'target_id', $taxon->nid, '=');
+			// ->propertyCondition('type', 'gene');
+		$results = $query->execute();
+		$taxon->field_gene_count[$taxon->language][0]['value'] = count($results['node']);
+		node_save($taxon);
+	}*/
+}
+
+/***************PARSERS******************/
+
+function parse_gaf_url($gaf_url) {
+    
+    //parsed_array entities follow schema from shared txt file
+    $html_str = htmlspecialchars(curl_get_contents($gaf_url));
+    $final_array = array();
+
+    $exploded_array = explode("\n",$html_str);
+    foreach($exploded_array as $annotation_string){
+    	$annotation = explode("\t",$annotation_string);
+    	if((count($annotation) == 17) && ($annotation[0][0] != '!')){
+    		$parsed_array = array();
+            $parsed_array['source'] = $annotation[0];
+            $parsed_array['object'] = $annotation[1];
+            $parsed_array['object_symbol'] = $annotation[2];
+            $parsed_array['annotation_qualifier'] = $annotation[3];
+            $parsed_array['GO_ID'] = $annotation[4];
+            $parsed_array['reference'] = $annotation[5];
+            $parsed_array['evidence'] = $annotation[6];
+            $parsed_array['withfrom'] = $annotation[7];
+            $parsed_array['aspect'] = $annotation[8];
+            $parsed_array['synonyms1'] = $annotation[9];
+            $parsed_array['synonyms2'] = $annotation[10];
+            $parsed_array['object_type'] = $annotation[11];
+            $parsed_array['taxon_id'] = $annotation[12];
+            $parsed_array['date'] = $annotation[13];
+            $parsed_array['assigned_by'] = $annotation[14];
+            $parsed_array['annotation_extension'] = $annotation[15];
+            $parsed_array['gene_product_form_id'] = $annotation[16];
+            $final_array[] = $parsed_array;
+    	}
+    }
+
+    return $final_array;
+}
+
+function parse_gaf_lines($lines){
+	//$lines = explode("\n", $gaf_file_content);
+	$final_array = array();
+	foreach($lines as $line){
+		//skip comments
+		$first_char = substr($line, 0, 1);
+		$annotation = explode("\t",$line);
+
+		if(( $first_char != '!')&&(validate_gaf_line_array($annotation))) {
+			$parsed_array = array();
+            $parsed_array['source'] = $annotation[0];
+            $parsed_array['object'] = $annotation[1];
+            $parsed_array['object_symbol'] = $annotation[2];
+            $parsed_array['annotation_qualifier'] = $annotation[3];
+            $parsed_array['GO_ID'] = $annotation[4];
+            $parsed_array['reference'] = $annotation[5];
+            $parsed_array['evidence'] = $annotation[6];
+            $parsed_array['withfrom'] = $annotation[7];
+            $parsed_array['aspect'] = $annotation[8];
+            $parsed_array['synonyms1'] = $annotation[9];
+            $parsed_array['synonyms2'] = $annotation[10];
+            $parsed_array['object_type'] = $annotation[11];
+            $parsed_array['taxon_id'] = $annotation[12];
+            $parsed_array['date'] = $annotation[13];
+            $parsed_array['assigned_by'] = $annotation[14];
+            $parsed_array['annotation_extension'] = $annotation[15];
+            $parsed_array['gene_product_form_id'] = $annotation[16];
+            $final_array[] = $parsed_array;
+		}
+	}
+	return $final_array;
+}
+
+function parse_gaf_file($gaf_file_content){
+	$lines = explode("\n", $gaf_file_content);
+	$final_array = array();
+	foreach($lines as $line){
+		//skip comments
+		$first_char = substr($line, 0, 1);
+		$annotation = explode("\t",$line);
+
+		if(( $first_char != '!')&&(validate_gaf_line_array($annotation))) {
+			echo 'count: '.count($final_array).'<br>';
+			echo 'mem usage: '.memory_get_usage().'<br>';
+			$parsed_array = array();
+            $parsed_array['source'] = $annotation[0];
+            $parsed_array['object'] = $annotation[1];
+            $parsed_array['object_symbol'] = $annotation[2];
+            $parsed_array['annotation_qualifier'] = $annotation[3];
+            $parsed_array['GO_ID'] = $annotation[4];
+            $parsed_array['reference'] = $annotation[5];
+            $parsed_array['evidence'] = $annotation[6];
+            $parsed_array['withfrom'] = $annotation[7];
+            $parsed_array['aspect'] = $annotation[8];
+            $parsed_array['synonyms1'] = $annotation[9];
+            $parsed_array['synonyms2'] = $annotation[10];
+            $parsed_array['object_type'] = $annotation[11];
+            $parsed_array['taxon_id'] = $annotation[12];
+            $parsed_array['date'] = $annotation[13];
+            $parsed_array['assigned_by'] = $annotation[14];
+            $parsed_array['annotation_extension'] = $annotation[15];
+            $parsed_array['gene_product_form_id'] = $annotation[16];
+            $final_array[] = $parsed_array;
+		}
+	}
+	return $final_array;
+}
+
+ /**
+ * parse_owl($owl_url, $version).
+ *
+ * Parses a given OWL file, returning an array of arrays which represent different entities.
+ *
+ * @param owl_url 
+ *   The URL with the OWL data to be parsed
+ */
+function parse_owl($owl_url){
+	$html_str = htmlspecialchars(curl_get_contents($owl_url));
+	//match on all class entities
+	$re = htmlspecialchars('/<owl:Class.*?<\/owl:Class>/s');
+
+	preg_match_all($re, $html_str, $matches, PREG_SET_ORDER, 0);
+
+	$final_array = array();
+	foreach($matches as $index => $match){
+        if(preg_match('/NCBITaxon_\d+/',$match[0])) {
+            //create entity array
+            $parsed_array = array();
+            //Taxon ID
+            if(preg_match(htmlspecialchars('/<owl:Class.*?NCBITaxon_(\d*?)">/s'), $match[0], $output)){
+                $parsed_array['id'] = $output[1]; //gets the capture group
+            } else {
+                $parsed_array['id'] = 'BAD NCBITAXONID';
+            }
+            //Rank
+            if(preg_match(htmlspecialchars('/<ncbitaxon:has_rank.*?NCBITaxon_(.*?)"\/>/s'), $match[0], $output)){
+                $parsed_array['rank'] = $output[1]; //gets the capture group
+            } else {
+                $parsed_array['rank'] = 'no rank';
+                if($parsed_array['id']==1||$parsed_array['id']==131567){
+            		$parsed_array['rank'] = 'root';
+            	}
+            }
+            //Label - will need to parse for genus/species when importing
+            if(preg_match(htmlspecialchars('/<rdfs:label.*?>(.*?)<\/rdfs:label>/s'), $match[0], $output)){
+                $parsed_array['label'] = $output[1]; //gets the capture group
+            } else {
+                $parsed_array['label'] = 'BAD LABEL';
+            }
+            //Parent
+            if(preg_match(htmlspecialchars('/<rdfs:subClassOf.*?NCBITaxon_(.*?)"\/>/s'), $match[0], $output)){
+                $parsed_array['parent'] = $output[1]; //gets the capture group
+            } else {
+                $parsed_array['parent'] = 'BAD PARENT ID';
+            }
+            //Synonyms
+            $parsed_array['synonyms']['related'][] = 'NO RELATED';
+            $parsed_array['synonyms']['exact'][] = 'NO EXACT';
+            
+            //get related syns
+            if(preg_match_all(htmlspecialchars('/<oboInOwl:hasRelatedSynonym.*?>(.*?)<\/oboInOwl:hasRelatedSynonym>/s'), $match[0], $related) !== 0){
+                $parsed_array['synonyms']['related'] = array();
+                foreach($related[1] as $synonym){
+                    $parsed_array['synonyms']['related'][] = $synonym;
+                }
+            }
+            //get exact syns
+            if(preg_match_all(htmlspecialchars('/<oboInOwl:hasExactSynonym.*?>(.*?)<\/oboInOwl:hasExactSynonym>/s'), $match[0], $exact) !== 0){
+                $parsed_array['synonyms']['exact'] = array();
+                foreach($exact[1] as $synonym){
+                    $parsed_array['synonyms']['exact'][] = $synonym;
+                }
+            }
+            if($parsed_array['rank'] == 'species'){
+                array_unshift($final_array, $parsed_array);
+            } else {
+                array_push($final_array, $parsed_array);
+            }
+        }
+    }
+	return $final_array;
+}
+
+function parse_sources_yaml(){
+	//add dynamic url functionality if needed
+    $yaml_str = htmlspecialchars(curl_get_contents('https://raw.githubusercontent.com/Planteome/go-site-xrefs-fork/master/metadata/db-xrefs.yaml'));
+    preg_match_all('/base: .*?(?:- data|$)/s', $yaml_str, $db_matches);
+
+	$ret_arr = array();
+
+	foreach($db_matches[0] as $db_match){
+	    preg_match('/base: (.*?) name: (.*?)(?:description|generic_url|synonyms).*?entity_types:(.*?)- data/s', $db_match, $name_and_ent_types_match);
+	    //DB NAME
+	    if( count($name_and_ent_types_match) != 0){
+	        $source_data_array = array();
+	        $source_machine_name = $name_and_ent_types_match[1];
+            $source_human_name = $name_and_ent_types_match[2];
+	        $source_data_array['human_name'] = trim($source_human_name);
+            $source_data_array['machine_name'] = trim($source_machine_name);
+	        $source_data_array['no_yaml_entities'] = 0;
+	        $source_data_array['no_entity_type_name'] = 0;
+	        $source_data_array['no_entity_id_syntax'] = 0;
+	        $source_data_array['no_url_syntax'] = 0;
+	        preg_match_all('/e_name: .*?(?:- typ|$)/s',$name_and_ent_types_match[3],$db_entity_types);
+	        if( count($db_entity_types) > 0){
+	            //go through each entity type to pull out data
+	            for($x=0;$x<count($db_entity_types[0]);$x++){
+	                $db_entity = $db_entity_types[0][$x];
+	                if(preg_match('/e_name: (.*?) ./s',$db_entity,$entity_type_name)){
+	                    $source_data_array['yaml_entities'][$x]['entity_type_name'] = trim($entity_type_name[1]);
+	                } else {
+	                    $source_data_array['no_entity_type_name'] = 1;
+	                }
+	                if(preg_match('/id_syntax: (.*?) (?:.|$)/s',$db_entity,$entity_id_syntax)){
+	                    $source_data_array['yaml_entities'][$x]['entity_id_syntax'] = trim($entity_id_syntax[1]);
+	                } else {
+	                    $source_data_array['no_entity_id_syntax'] = 1;
+	                }
+	                if(preg_match('/url_syntax: (.*?)(?: .|$)/s',$db_entity,$url_syntax)){
+	                    $source_data_array['yaml_entities'][$x]['url_syntax'] = trim($url_syntax[1]);
+	                } else {
+	                    $source_data_array['no_url_syntax'] = 1;
+	                }
+	            }
+	        } else {
+	            //flag all
+	            $source_data_array['no_yaml_entities'] = 1;
+	            $source_data_array['no_entity_type_name'] = 1;
+	            $source_data_array['no_entity_id_syntax'] = 1;
+	            $source_data_array['no_url_syntax'] = 1;
+	        }
+	        
+	        array_push($ret_arr, $source_data_array);
+	    }
+	}
+    return $ret_arr;
+    
+}
+
+/***************HELPERS**********************/
+
+
+// Clear malformed genes form
+function clear_malformed_genes_form($form, &$form_state){
+	$form['data'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Enter species.',
+		'#required'			=> TRUE,
+		'#autocomplete_path'=> 'autocomplete/species',
+	);
+	$form['password'] = array(
+		'#type'				=> 'password',
+		'#title'			=> 'Password'
+	);
+	$form['submit'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('Click to remove ALL genes associated with the selected species.'),
+	);
+	return $form;
+}
+
+function clear_malformed_genes_form_validate($form, &$form_state){
+	if($form_state['values']['password'] != 'password'){
+		form_set_error('clear_malformed_genes_form', t('Cmon now.'));
+	}
+}
+
+function clear_malformed_genes_form_submit($form, &$form_state){
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type','node')
+		->entityCondition('bundle','taxon')
+		->propertyCondition('type',array('taxon'))
+		->propertyCondition('title', $form_state['values']['data']);
+	$results = $query->execute();
+	
+	$species_nid = array_keys($results['node'])[0];
+	$q = new EntityFieldQuery();
+	$q->entityCondition('entity_type','node')
+		->entityCondition('bundle','gene')
+		->propertyCondition('type',array('gene'))
+		->fieldCondition('field_ref_species', 'target_id', $species_nid, '=');
+	$r = $q->execute();
+	if(count($r['node'])){
+		$chunks = array_chunk($r['node'], 40);
+	    $operations = array();
+	    foreach($chunks as $chunk){
+	    	$operations[] = array('delete_malformed_gene_batch', array($chunk));
+	    }
+
+	    $batch = array(
+	    	'operations'		=> $operations,
+	    	'finished'			=> 'clear_malformed_genes_process_finished',
+	    	'title'				=> t('processing gene batch'),
+	    	'init_message'		=> t('starting clear genes batch process'),
+	    	'progress_message'	=> t('processed @current out of @total')
+	   	);
+	   	batch_set($batch);
+	}
+	drupal_set_message(t('no genes to remove'));
+}
+
+function delete_malformed_gene_batch($chunk, &$context){
+	foreach($chunk as $gene_node){
+		node_delete($gene_node->nid);
+	}
+}
+
+function clear_malformed_genes_process_finished($success, $results, $operations) {
+  //Let the user know we have finished!
+  print t('Finished clearing genes');
+}
+
+function add_gene_synonyms_form($form, &$form_state){
+	$form['species'] = array(
+		'#type'				=> 'textfield',
+		'#title'			=> 'Enter species.',
+		'#autocomplete_path'=> 'autocomplete/species',
+	);
+	$form['synonym_file'] = array(
+		'#type'				=> 'file',
+		'#title'			=> 'Upload synonym file',
+	);
+	$form['synonym_file_alt'] = array(
+		'#type' 			=> 'checkbox',
+		'#title' 			=> t('Use alternative file parser? (for files from UNIX/Mac OS X+)'),
+	);
+	$form['submit'] = array(
+		'#type'				=> 'submit',
+		'#value'			=> 'Submit',
+	);
+	return $form;
+}
+
+function add_gene_synonyms_form_validate($form, &$form_state){
+}
+
+function add_gene_synonyms_form_submit($form, &$form_state){
+
+	$file = file_save_upload('synonym_file', array(
+        'file_validate_extensions' => array('txt'),
+    ));
+    $content = file_get_contents($file->uri);
+    file_delete($file);
+    if($form_state['values']['synonym_file_alt']){
+    	//use UNIX/MACOSX \n
+    	$arr1 = tabbed_file_to_array_alt($content);
+    } else {
+    	//use windows \r\n
+    	$arr1 = tabbed_file_to_array($content);
+    }
+    $chunks = array_chunk($arr1, 40);
+    $operations = array();
+    foreach($chunks as $chunk){
+    	$operations[] = array('add_gene_synonym', array($chunk));
+    }
+
+    $batch = array(
+    	'operations'		=> $operations,
+    	'finished'			=> 'add_gene_synonym_process_finished',
+    	'title'				=> t('processing gene synonym batch'),
+    	'init_message'		=> t('starting gene synonym batch process'),
+    	'progress_message'	=> t('processed @current out of @total')
+   	);
+   	batch_set($batch);
+}
+
+function add_gene_synonym_process_finished($success, $results, $operations) {
+  //Let the user know we have finished!
+  print t('Finished adding!');
+}
+
+function add_gene_synonym($chunk){
+	foreach($chunk as $gene_syn){
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type','node')
+			->entityCondition('bundle','gene')
+			->propertyCondition('type',array('gene'))
+			->fieldCondition('field_gene_id','value', $gene_syn['gene_stable_id']);
+		$results = $query->execute();
+		if(count($results)){
+			$gene_nid = array_keys($results['node'])[0];
+			$node = node_load($gene_nid);
+			$node->field_synonyms[$node->language][]['value'] = $gene_syn['synonym_to_add'];
+			$node = node_submit($node);
+			node_save($node);
+		}
+	}
+}
+
+//Translate GAF ID form
+//NOTE
+//currently half-developed, would need to add a batch to process target ids into tmptable, then another batch to build a file with translated target ids.
+//Zea Mays genes were the ones that precipitated this, but they don't actually seem to overlap between the gene file and the translation file.
+function translate_gaf_id_form($form, &$form_state){
+	$form['gaf_file'] = array(
+	    '#type' => 'file',
+	    '#title' => t('Upload gaf file'),
+	);
+	$form['translate_file'] = array(
+	    '#type' => 'file',
+	    '#title' => t('Upload translation file'),
+	);
+	$form['submit'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('Submit'),
+	);
+	return $form;
+}
+
+function translate_gaf_id_form_validate($form, &$form_state){
+}
+
+function translate_gaf_id_form_submit($form, &$form_state){
+	// if(db_table_exists('annotation_accession')){
+	// 	db_drop_table('annotation_accession');
+	// 	exit('annotation_accession dropped');
+	// }
+
+	/*$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type','node')
+		->entityCondition('bundle','taxon')
+		->propertyCondition('type',array('taxon'))
+		->propertyCondition('title', $form_state['values']['data']); //this will be updated when we change the context, and can likely be moved outside the batch process altogether
+	$results = $query->execute();
+	
+	$species_nid = array_keys($results['node'])[0];
+	$source_name = $form_state['values']['source'];
+
+	if(db_table_exists('tmptable')){
+		db_drop_table('tmptable');
+	}
+	/*if(db_table_exists('accession')){
+		db_drop_table('accession');
+		exit('accession dropped');
+	}*/
+
+
+	/*if(db_table_exists('accession') == FALSE){
+		$schema = array(
+		    'description' => 'Table to track accession incrementation',
+		    'fields' => array(
+		    	'accession' => array(
+		        	'type' => 'int',
+		        	'not null' => TRUE,
+		        	'description' => 'Primary Key: Unique aggregator static media asset ID.'),),
+		    'primary key' => array('accession'),
+		  );
+		db_create_table('accession',$schema);
+		db_insert('accession')
+		->fields(array(
+			'accession' 	=> 1,
+			))
+		->execute();
+		//exit('accession created, starting with 1');
+	}
+	//exit('accession exists');
+
+	//saved the file into a tmp folder (location to save not set)
+    //this will also add a pointer in the database
+    $file1 = file_save_upload('gene_file', array(
+        'file_validate_extensions' => array('txt'),
+    ));
+    $file2 = file_save_upload('alias_file', array(
+        'file_validate_extensions' => array('txt'),
+    ));
+
+    //get the content in the file
+    $content1 = file_get_contents($file1->uri);
+    $content2 = file_get_contents($file2->uri);
+
+    //remove the file in temp and the pointer in the database
+    file_delete($file1);
+    file_delete($file2);
+
+    if($form_state['values']['gene_file_alt']){
+    	//use UNIX/MACOSX \n
+    	$arr1 = tabbed_file_to_array_alt($content1);
+    } else {
+    	//use windows \r\n
+    	$arr1 = tabbed_file_to_array($content1);
+    }
+
+    if($form_state['values']['alias_file_alt']){
+    	//use UNIX/MACOSX \n
+    	$arr2 = tabbed_file_to_array_alt($content2);
+    } else {
+    	//use windows \r\n
+    	$arr2 = tabbed_file_to_array($content2);
+    }
+
+    // $arr1 = tabbed_file_to_array($content1);
+    // $arr2 = tabbed_file_to_array_alt($content2);
+    $chunks1 = array_chunk($arr1, 10);
+    $chunks2 = array_chunk($arr2, 40);
+    //echo '<pre>';print_r($chunks2);exit;
+
+    if(db_table_exists('tmptable') == FALSE){
+		$schema = array(
+		    'description' => 'tmp table',
+		    'fields' => array(
+		    	'pid' => array(
+		        	'type' => 'serial',
+		        	'not null' => TRUE,
+		        	'description' => 'Primary Key: Unique aggregator static media asset ID.'),
+		      	'gene_stable_id' => array(
+		        	'type' => 'varchar',
+		        	'length' => 255,
+		        	'not null' => TRUE,
+		        	'default' => '',),
+		      	'gene_symbol' => array(
+		        	'type' => 'varchar',
+		        	'length' => 255,
+		        	'not null' => FALSE,
+		        	'default' => '',),
+		      	'gene_name' => array(
+		        	'type' => 'varchar',
+		        	'length' => 255,
+		        	'not null' => FALSE,),),
+		    'primary key' => array('pid'),
+		  );
+		db_create_table('tmptable',$schema);
+		
+	}
+	//echo'<pre>';var_dump($chunks2);exit;
+
+	$operations = array();
+    foreach($chunks2 as $chunk2){
+    	$operations[] = array('insert_gene_aliases', array($chunk2));
+    }
+    foreach($chunks1 as $chunk1){
+    	$operations[] = array('import_gene_data_to_node', array($chunk1, $species_nid, $source_name));
+    }
+
+    $batch = array(
+    	'operations'		=> $operations,
+    	'finished'			=> 'biomart_process_finished',
+    	'title'				=> t('processing biomart gene batch'),
+    	'init_message'		=> t('starting biomart batch process'),
+    	'progress_message'	=> t('processed @current out of @total')
+   	);
+
+	if(db_table_exists('tmptable')){
+		db_drop_table('tmptable');
+	}
+	if(db_table_exists('annotation_accession') == FALSE){
+		$schema = array(
+		    'description' => 'Table to track annotation accession incrementation',
+		    'fields' => array(
+		    	'accession' => array(
+		        	'type' => 'int',
+		        	'not null' => TRUE,
+		        	'description' => 'Primary Key'),),
+		    'primary key' => array('accession'),
+		  );
+		db_create_table('annotation_accession',$schema);
+		db_insert('annotation_accession')
+		->fields(array(
+			'accession' 	=> 1,
+			))
+		->execute();
+		//exit('accession created, starting with 1');
+	}
+
+	$file = file_save_upload('gaf_file', array(
+        'file_validate_extensions' => array('assoc'),
+    ));
+    $content = file_get_contents($file->uri);
+    file_delete($file);
+
+    $annotation_array = parse_gaf_file($content);
+    $chunks = array_chunk($annotation_array, 40);
+    //echo '<pre>';var_dump($chunks);exit;
+    $id_syntax = $form_state['values']['id_syntax'];
+
+    $operations = array();
+    foreach($chunks as $chunk){
+    	$operations[] = array('import_annotation_to_node', array($chunk,$id_syntax));
+    }*/
+    $batch = array(
+    	'operations'		=> $operations,
+    	'finished'			=> 'translate_gaf_id_process_finished',
+    	'title'				=> t('translating annotation batch'),
+    	'init_message'		=> t('starting annotation translate batch process'),
+    	'progress_message'	=> t('processed @current out of @total')
+   	);
+
+   	echo '<pre>';var_dump($batch);exit;
+
+   	batch_set($batch);
+}
+
+function translate_gaf_id_process_finished(){
+
+}
+
+function validate_gaf_line_array($array){
+	if((count($array) != 17)||
+		($array[0] == '')||
+		($array[1] == '')||
+		($array[2] == '')||
+		($array[4] == '')||
+		($array[5] == '')||
+		($array[6] == '')||
+		($array[8] == '')||
+		($array[11] == '')||
+		($array[12] == '')||
+		($array[13] == '')||
+		($array[14] == '')) {
+		return FALSE;
+	} else {
+		return TRUE;
+	}
+}
+
+
+function annotation_to_gaf_line($annotation_nid){
+	$annotation = node_load($annotation_nid);
+	// echo'<pre>';var_dump($annotation);exit;
+	if($annotation->status != 1){
+		return '';
+	}
+	//field collction id
+	// echo'<pre>';var_dump($annotation);exit;
+	if(empty($annotation->field_publication)){
+		return '';
+	} else {
+		$biblios = $annotation->field_publication[$annotation->language];
+		// echo'<pre>';
+		$tmp1 = '';
+		foreach ($biblios as $key => $value) {
+			$biblio = node_load($biblios[$key]['target_id']);
+			if($key != 0){
+				$tmp1.= '|';
+			}
+			if(isset($biblio->biblio_pubmed_id)){
+				$tmp1.= 'PMID:'.$biblio->biblio_pubmed_id;
+			} else {
+				$tmp1.= $biblio->biblio_other_number;
+			}
+
+			// var_dump($biblio);
+			// var_dump($biblio->biblio_pubmed_id);
+		}
+		// exit;
+		// echo'<pre>';var_dump($tmp1);exit;
+		if($tmp1 == ''){
+			return '';
+		}
+	}
+
+	/*//DEPRECATED
+	// now that we are using the Biblio module, this is not needed.
+
+	$data_source_fc_id = $annotation->field_data_source[$annotation->language][0]['value'];
+	$tmp1 = '';
+	if(count($annotation->field_db_reference) > 0){
+		for($x=0;$x<count($annotation->field_db_reference[$annotation->language]);$x++){
+			$db_reference_fc_id = $annotation->field_db_reference[$annotation->language][$x]['value'];
+			$db_reference = entity_load('field_collection_item', array($db_reference_fc_id));
+			$reference_term = taxonomy_term_load($db_reference[$db_reference_fc_id]->field_source_name[$annotation->language][0]['tid']);
+			if($reference_term->field_machine_name['und'][0]['value'] != ''){
+				if($x!=0){$tmp1.='|';}
+				$tmp1 .= $reference_term->field_machine_name['und'][0]['value'];
+				if($db_reference[$db_reference_fc_id]->field_object_id[$annotation->language][0]['value'] != ''){
+					$tmp1 .= ':';
+					$tmp1 .= $db_reference[$db_reference_fc_id]->field_object_id[$annotation->language][0]['value'];
+				}
+			}
+		}
+	}*/
+
+	// echo'<pre>';var_dump($tmp1);exit;
+
+	$tmp2 = '';
+	if(count($annotation->field_with_or_from) > 0){
+		for($x=0;$x<count($annotation->field_with_or_from[$annotation->language]);$x++){
+			$with_or_from_fc_id = $annotation->field_with_or_from[$annotation->language][$x]['value'];
+			$with_or_from = entity_load('field_collection_item', array($with_or_from_fc_id));
+			$reference_term = taxonomy_term_load($with_or_from[$with_or_from_fc_id]->field_source_name[$annotation->language][0]['tid']);
+			if($reference_term->field_machine_name['und'][0]['value'] != ''){
+				if($x!=0){$tmp2.='|';}
+				$tmp2 .= $reference_term->field_machine_name['und'][0]['value'];
+				if($with_or_from[$with_or_from_fc_id]->field_object_id[$annotation->language][0]['value'] != ''){
+					$tmp2 .= ':';
+					$tmp2 .= $with_or_from[$with_or_from_fc_id]->field_object_id[$annotation->language][0]['value'];
+				}
+			}
+		}
+	}
+
+	$data_source = entity_load('field_collection_item', array($data_source_fc_id));
+	$gene = node_load($annotation->field_gene[$annotation->language][0]['target_id']);
+	$species = node_load($annotation->field_ref_species[$annotation->language][0]['target_id']);
+	$source_term = taxonomy_term_load($data_source[$data_source_fc_id]->field_source_name[$annotation->language][0]['tid']);
+
+	$tmp3 = '';
+	for($x=0;$x<count($gene->field_synonyms);$x++){
+		$synonym = explode("|",$gene->field_synonyms[$gene->language][$x]['value']);
+		if($x!=0){$tmp3.='|';}
+		$tmp3 .= $synonym[0];
+		if(count($synonym)!=1){
+			$tmp3 .= '|'.$synonym[1];
+		}
+	}
+
+
+	//col 1
+	$db = 'planteome';
+	//col 2
+	$db_object_id = $annotation->title;
+	//col 3
+	$db_object_symbol = $gene->field_gene_id[$gene->language][0]['value'];
+	//col 4
+	if($annotation->field_qualifier[$annotation->language][0]['value'] == NULL){
+		$qualifier = '';
+	} else {
+		$qualifier = $annotation->field_qualifier[$annotation->language][0]['value'];
+	}
+	//col 5
+	$go_id = get_ontology_id_from_term($annotation->field_ontology_id[$annotation->language][0]['value']);
+	//col 6
+	$db_reference = $tmp1;
+	//col 7
+	$evidence_code = taxonomy_term_load($annotation->field_evidence_code[$annotation->language][0]['tid'])->field_machine_name[$annotation->language][0]['value'];
+	//col 8
+	$with_or_from = $tmp2;
+	//col 9
+	$aspect = taxonomy_term_load($annotation->field_aspect[$annotation->language][0]['tid'])->field_machine_name[$annotation->language][0]['value'];
+	//col 10
+	$db_object_name = $gene->title;
+	//col 11
+	if($tmp3 == ''){
+		$db_object_synonyms = $gene->field_gene_id[$gene->language][0]['value'].'|'.$gene->field_gene_symbol[$gene->language][0]['value'];
+	} else {
+		$db_object_synonyms = $tmp3.'|'.$gene->field_gene_id[$gene->language][0]['value'].'|'.$gene->field_gene_symbol[$gene->language][0]['value'];
+	}
+	//col 12
+	$zzz = taxonomy_term_load($gene->field_gene_type[$gene->language][0]['tid']);
+	$db_object_type = $zzz->name;
+	//col 13
+	$taxon = 'taxon:'.$species->field_taxon_ncbi_id[$species->language][0]['value'];
+	//col 14
+	$date = date( 'Ymd', $annotation->field_date[$annotation->language][0]['value']);
+	//col 15
+	$assigned_by = $annotation->field_assigned_by[$annotation->language][0]['value'];
+	//col 16
+	if($annotation->field_annotation_extension[$annotation->language][0]['value'] == NULL){
+		$extension = '';
+	} else {
+		$extension = $annotation->field_annotation_extension[$annotation->language][0]['value'];
+	}
+	//col 17
+	if($annotation->field_gene_product_form_id[$annotation->language][0]['value'] == NULL){
+		$gene_product_form_id = '';
+	} else {
+		$gene_product_form_id = $annotation->field_gene_product_form_id[$annotation->language][0]['value'];
+	}
+
+	$gaf_line = $db."\t".$db_object_id."\t".$db_object_symbol."\t".$qualifier."\t".$go_id."\t".$db_reference."\t".$evidence_code."\t".$with_or_from."\t".$aspect."\t".$db_object_name."\t".$db_object_synonyms."\t".$db_object_type."\t".$taxon."\t".$date."\t".$assigned_by."\t".$extension."\t".$gene_product_form_id."\n";
+	return $gaf_line;
+}
+
+function update_sources(){
+	//will want something here to check that the yaml response is valid.
+
+	//TODO 6 - Lakshit
+	//		 - Investigate how we can validate the YAML data we're pulling
+	//		 - Would replace the (1) after this next line
+	$source_yaml_array = parse_sources_yaml();
+	if (1) {
+		//good YAML read - proceed
+		foreach($source_yaml_array as $source){
+			$drupal_name = $source['human_name'].' ('.$source['machine_name'].')';
+			$term_array = taxonomy_get_term_by_name($drupal_name);
+			if(count($term_array) !== 0){
+				//source term already exists
+				$term = reset($term_array);
+				$term->field_machine_name[LANGUAGE_NONE][0]['value'] = $source['machine_name'];
+				$term->field_flag_no_yaml_entities[LANGUAGE_NONE][0]['value'] = $source['no_yaml_entities'];
+				$term->field_flag_no_entity_type_name[LANGUAGE_NONE][0]['value'] = $source['no_entity_type_name'];
+				$term->field_flag_no_entity_id_syntax[LANGUAGE_NONE][0]['value'] = $source['no_entity_id_syntax'];
+				$term->field_flag_no_url_syntax[LANGUAGE_NONE][0]['value'] = $source['no_url_syntax'];
+				taxonomy_term_save($term);
+				if($source['no_yaml_entities'] == 0){
+					$field_collection_item_values = array();
+					foreach ($term->field_yaml_entity[LANGUAGE_NONE] as $key => $value) {
+						$field_collection_item_values[] = $value['value'];
+						unset($term->field_yaml_entity[LANGUAGE_NONE][$key]);
+					}
+					entity_delete_multiple('field_collection_item', $field_collection_item_values);
+					foreach($source['yaml_entities'] as $yaml_entity){
+						
+						$field_collection_item = entity_create('field_collection_item', array('field_name' => 'field_yaml_entity'));
+						$field_collection_item->setHostEntity('taxonomy_term', $term);
+						if(array_key_exists('entity_type_name', $yaml_entity)){
+							$field_collection_item->field_yaml_entity_type_name[LANGUAGE_NONE][0]['value'] = $yaml_entity['entity_type_name'];
+						}
+						if(array_key_exists('entity_id_syntax', $yaml_entity)){
+							$field_collection_item->field_yaml_entity_id_syntax[LANGUAGE_NONE][0]['value'] = $yaml_entity['entity_id_syntax'];
+						}
+						if(array_key_exists('url_syntax', $yaml_entity)){
+							$field_collection_item->field_yaml_entity_url_syntax[LANGUAGE_NONE][0]['value'] = $yaml_entity['url_syntax'];
+						}
+						$field_collection_item->save();
+
+						$term->field_yaml_entity[LANGUAGE_NONE][]['value'] = $field_collection_item->item_id;
+					}
+				}
+				taxonomy_term_save($term);
+			} else {
+				//TODO 1 - Jacob
+				//Do we really need to add in new sources? Shouldn't they only be using sources from the yaml file sent to us?
+				//source term doesn't exist, need to create it
+				$sources_tree = taxonomy_vocabulary_machine_name_load('sources');
+				$source_vid = $sources_tree->vid;
+				$term = new stdClass();
+				$term->name = $drupal_name;
+				$term->field_machine_name[LANGUAGE_NONE][0]['value'] = $source['machine_name'];
+				$term->vid = $source_vid;
+				$term->field_flag_unknown_source_name[LANGUAGE_NONE][0]['value'] = 0;
+				$term->field_flag_no_yaml_entities[LANGUAGE_NONE][0]['value'] = $source['no_yaml_entities'];
+				$term->field_flag_no_entity_type_name[LANGUAGE_NONE][0]['value'] = $source['no_entity_type_name'];
+				$term->field_flag_no_entity_id_syntax[LANGUAGE_NONE][0]['value'] = $source['no_entity_id_syntax'];
+				$term->field_flag_no_url_syntax[LANGUAGE_NONE][0]['value'] = $source['no_url_syntax'];
+				taxonomy_term_save($term);
+
+				if($source['no_yaml_entities'] == 0){
+					foreach($source['yaml_entities'] as $yaml_entity){
+						
+						$field_collection_item = entity_create('field_collection_item', array('field_name' => 'field_yaml_entity'));
+						$field_collection_item->setHostEntity('taxonomy_term', $term);
+						if(array_key_exists('entity_type_name', $yaml_entity)){
+							$field_collection_item->field_yaml_entity_type_name[LANGUAGE_NONE][0]['value'] = $yaml_entity['entity_type_name'];
+						}
+						if(array_key_exists('entity_id_syntax', $yaml_entity)){
+							$field_collection_item->field_yaml_entity_id_syntax[LANGUAGE_NONE][0]['value'] = $yaml_entity['entity_id_syntax'];
+						}
+						if(array_key_exists('url_syntax', $yaml_entity)){
+							$field_collection_item->field_yaml_entity_url_syntax[LANGUAGE_NONE][0]['value'] = $yaml_entity['url_syntax'];
+						}
+						$field_collection_item->save();
+
+						$term->field_yaml_entity[LANGUAGE_NONE][]['value'] = $field_collection_item->item_id;
+					}
+				}
+				taxonomy_term_save($term);
+			}
+		}
+	} else {
+		//here is where we would handle a YAML error
+	}
+}
+
+//annotation batch processes
+
+function array_flatten($array = null) {
+    $result = array();
+
+    if (!is_array($array)) {
+        $array = func_get_args();
+    }
+
+    foreach ($array as $key => $value) {
+        if (is_array($value)) {
+            $result = array_merge($result, array_flatten($value));
+        } else {
+            $result = array_merge($result, array($key => $value));
+        }
+    }
+
+    return $result;
+}
+
+function import_annotation_to_node($chunk, $id_syntax, &$context){
+	$chunk = parse_gaf_lines($chunk);
+	foreach($chunk as $data){
+		//$data contains an array representing the data from a GAF file for a given annotation
+		$possible_symbols = array();
+		array_push($possible_symbols,explode("|", $data['object_symbol']),explode("|", $data['synonyms1']),explode("|", $data['synonyms2']));
+		$possible_symbols = array_unique(array_flatten($possible_symbols));
+		$possible_symbols = implode(',',$possible_symbols);
+		$regex = '/';
+
+		$strlen = strlen( $id_syntax );
+		for( $i = 0; $i < $strlen; $i++ ) {
+		    $char = substr( $id_syntax, $i, 1 );
+		    if($char == '#'){
+		    	$regex .= '\d';
+		    } else {
+		    	$regex .= '['.strtoupper($char).strtolower($char).']';
+		    }
+		}
+
+		$regex .= '/s';
+
+		//$id is the key
+		preg_match($regex, $possible_symbols, $id);
+		if(count($id)==0){
+			continue;
+		}
+
+		$taxon_number = array_reverse(explode(':',$data['taxon_id']))[0];
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type','node')
+			->entityCondition('bundle','taxon')
+			->propertyCondition('type',array('taxon'))
+			->fieldCondition('field_taxon_ncbi_id', 'value', $taxon_number); //this will be updated when we change the context, and can likely be moved outside the batch process altogether
+		$results = $query->execute();
+		$species_nid = array_keys($results['node'])[0];
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type','node')
+			->entityCondition('bundle','gene')
+			->propertyCondition('type',array('gene'))
+			->fieldCondition('field_gene_id','value', $id)
+			->fieldCondition('field_ref_species', 'target_id', $species_nid, '=');
+		$results = $query->execute();
+		//the nid of the gene pointed to by the annotation
+		if(empty($results)){
+			continue;
+		}
+		$gene_nid = array_keys($results['node'])[0];
+
+		global $user; 
+		$node = new stdClass();
+
+		//TODO 7 - Lakshit
+		//		 - Verify that this AXXXXXXXXXX number is being correctly tracked and autoincremented
+		$node->title = 'A'.format_annotation_accession();//TODO - track this like our internal accession
+		$node->type = "annotation";
+		node_object_prepare($node); // Sets some defaults. Invokes hook_prepare() and hook_node_prepare().
+		$node->language = LANGUAGE_NONE;
+		$node->uid = $user->uid; 
+		$node->status = 1;
+		$node->promote = 0;
+		$node->comment = 1;
+
+		//ANNOTATION FIELDS are in the same order they are in the Drupal content type
+		//qualifier
+		$node->field_qualifier[$node->language][0]['value'] = $data['annotation_qualifier'];
+		//ontology ID
+		$node->field_ontology_id[$node->language][0]['value'] = $data['GO_ID'];
+		//date
+		//TODO 8 - Lakshit
+		//		 - Verify that the timestamp here is in UNIX format
+		$date = strtotime($data['date']);
+		$node->field_date[$node->language][0]['value'] = $date;
+		//assigned by
+		$node->field_assigned_by[$node->language][0]['value'] = $data['assigned_by'];
+		//annotation extension
+		$node->field_annotation_extension[$node->language][0]['value'] = $data['annotation_extension'];
+		//gene product form ID
+		$node->field_gene_product_form_id[$node->language][0]['value'] = $data['gene_product_form_id'];
+		//evidence code
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type', 'taxonomy_term')
+		    ->fieldCondition('field_machine_name', 'value', $data['evidence'], '=');
+		$result = $query->execute();
+		if(!empty($result['taxonomy_term'])){
+			//term already exists
+			$term = reset($result['taxonomy_term']);
+			//echo'<pre>';var_dump($term->tid);exit;
+			$node->field_evidence_code[$node->language][0]['tid'] = $term->tid; //term id of the term which is in taxonomy
+		} else {
+			//term doesn't exist, this is wrong. :P
+			continue;
+		}
+		//aspect
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type', 'taxonomy_term')
+		    ->fieldCondition('field_machine_name', 'value', $data['aspect'], '=');
+		$result = $query->execute();
+		if(!empty($result['taxonomy_term'])){
+			//term already exists
+			$term = reset($result['taxonomy_term']);
+			$node->field_aspect[$node->language][0]['tid'] = $term->tid; //term id of the term which is in taxonomy
+		} else {
+			//term doesn't exist, this is wrong
+			continue;
+		}
+		//gene
+		$node->field_gene[$node->language][0]['target_id'] = $gene_nid;
+		//species
+		$node->field_ref_species[$node->language][0]['target_id'] = $species_nid;
+		//data source
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type', 'taxonomy_term')
+		    ->fieldCondition('field_machine_name', 'value', $data['source'], '=');
+		$result = $query->execute();
+
+		if(!empty($result['taxonomy_term'])) {
+			//term already exists
+			$term = reset($result['taxonomy_term']);
+			//term id of the term which is in taxonomy
+		} else {
+			//term doesn't exist, need to create it
+			$taxon_tree = taxonomy_vocabulary_machine_name_load('sources');
+			$taxon_vid = $taxon_tree->vid;
+			$term = new stdClass();
+			$term->name = $data['source'];
+			$term->field_flag_no_yaml_entities[LANGUAGE_NONE][0]['value'] = $source['no_yaml_entities'];
+			$term->field_flag_no_entity_type_name[LANGUAGE_NONE][0]['value'] = $source['no_entity_type_name'];
+			$term->field_flag_no_entity_id_syntax[LANGUAGE_NONE][0]['value'] = $source['no_entity_id_syntax'];
+			$term->field_flag_no_url_syntax[LANGUAGE_NONE][0]['value'] = $source['no_url_syntax'];
+			$term->vid = $taxon_vid;
+			taxonomy_term_save($term);
+			//term id of the term which is in taxonomy
+		}
+		$field_collection_item = entity_create('field_collection_item', array('field_name' => 'field_data_source'));
+		$field_collection_item->setHostEntity('node', $node);
+		$field_collection_item->field_source_name[$node->language][0]['tid'] = $term->tid;
+		$field_collection_item->field_object_id[$node->language][0]['value'] = $data['object'];
+		$field_collection_item->save();
+
+		$node->field_data_source[$node->language][0]['value'] = $field_collection_item->item_id;
+
+		//DB Reference
+		$dbref_array = explode("|", $data['reference']);
+		for($x=0;$x<count($dbref_array);$x++){
+			$parts = explode(':', $dbref_array[$x]);
+			$first = array_shift($parts);
+			$parts = implode(':', $parts);
+			$query = new EntityFieldQuery();
+			$query->entityCondition('entity_type', 'taxonomy_term')
+			    ->fieldCondition('field_machine_name', 'value', $first, '=');
+			$result = $query->execute();			
+
+			if(!empty($result['taxonomy_term'])) {
+				//term already exists
+				$term = reset($result['taxonomy_term']);
+				//term id of the term which is in taxonomy
+			} else {
+				//term doesn't exist, need to create it
+				$taxon_tree = taxonomy_vocabulary_machine_name_load('sources');
+				$taxon_vid = $taxon_tree->vid;
+				$term = new stdClass();
+				$term->name = $data['source'];
+				$term->field_flag_no_yaml_entities[LANGUAGE_NONE][0]['value'] = $source['no_yaml_entities'];
+				$term->field_flag_no_entity_type_name[LANGUAGE_NONE][0]['value'] = $source['no_entity_type_name'];
+				$term->field_flag_no_entity_id_syntax[LANGUAGE_NONE][0]['value'] = $source['no_entity_id_syntax'];
+				$term->field_flag_no_url_syntax[LANGUAGE_NONE][0]['value'] = $source['no_url_syntax'];
+				$term->vid = $taxon_vid;
+				taxonomy_term_save($term);
+				//term id of the term which is in taxonomy
+			}
+			$field_collection_item = entity_create('field_collection_item', array('field_name' => 'field_db_reference'));
+			$field_collection_item->setHostEntity('node', $node);
+			$field_collection_item->field_source_name[$node->language][$x]['tid'] = $term->tid;
+			$field_collection_item->field_object_id[$node->language][$x]['value'] = $parts;
+			$field_collection_item->save();
+			$node->field_db_reference[$node->language][$x]['value'] = $field_collection_item->item_id;
+		}
+
+		//field_publications
+		// generate_biblio_from_pmid(IN)
+		// echo'<pre>';var_dump($dbref_array);exit;
+		for($x=0;$x<count($dbref_array);$x++){
+			$parts = explode(':', $dbref_array[$x]);
+			$first = array_shift($parts);
+			$second = array_shift($parts);
+			$parts = implode(':', $parts);
+			if(strtoupper($first) == 'PMID'){
+				$biblio_nid = generate_biblio_from_pmid($second);
+			} elseif(strtoupper($first) == 'DOI'){
+				$biblio_nid = generate_biblio_from_doi($second);
+			} else {
+				$biblio_nid = generate_biblio_from_other($dbref_array[$x]);
+			}
+			// echo'<pre>'	;var_dump(node_load($biblio_nid));exit;
+			$node->field_publication[$node->language][$x]['target_id'] = $biblio_nid;
+			// $node->field_publications[$node->language][$x]['entity'] = node_load($biblio_nid);
+			// $node->field_publications[$node->language][$x]['access'] = TRUE;
+		}
+		// echo'<pre>';var_dump('test');exit;
+
+
+		//With or From
+		if($data['withfrom'] != ''){
+			$withfrom_array = explode("|", $data['withfrom']);
+			for($x=0;$x<count($withfrom_array);$x++){
+				$parts = explode(':', $withfrom_array[$x]);
+				$first = array_shift($parts);
+				$parts = implode(':', $parts);
+				$query = new EntityFieldQuery();
+				$query->entityCondition('entity_type', 'taxonomy_term')
+				    ->fieldCondition('field_machine_name', 'value', $first, '=');
+				$result = $query->execute();
+				if(!empty($result['taxonomy_term'])) {
+					//term already exists
+					$term = reset($result['taxonomy_term']);
+				} else {
+					//term doesn't exist, need to create it
+					$taxon_tree = taxonomy_vocabulary_machine_name_load('sources');
+					$taxon_vid = $taxon_tree->vid;
+					$term = new stdClass();
+					$term->name = $data['source'];
+					$term->field_flag_no_yaml_entities[LANGUAGE_NONE][0]['value'] = $source['no_yaml_entities'];
+					$term->field_flag_no_entity_type_name[LANGUAGE_NONE][0]['value'] = $source['no_entity_type_name'];
+					$term->field_flag_no_entity_id_syntax[LANGUAGE_NONE][0]['value'] = $source['no_entity_id_syntax'];
+					$term->field_flag_no_url_syntax[LANGUAGE_NONE][0]['value'] = $source['no_url_syntax'];
+					$term->vid = $taxon_vid;
+					taxonomy_term_save($term);
+					//term id of the term which is in taxonomy
+				}
+				$field_collection_item = entity_create('field_collection_item', array('field_name' => 'field_with_or_from'));
+				$field_collection_item->setHostEntity('node', $node);
+				$field_collection_item->field_source_name[$node->language][$x]['tid'] = $term->tid;
+				$field_collection_item->field_object_id[$node->language][$x]['value'] = $parts;
+				$field_collection_item->save();
+				$node->field_with_or_from[$node->language][$x]['value'] = $field_collection_item->item_id;
+			}
+		}
+		//should be done
+		$node = node_submit($node);
+		node_save($node);
+	}
+}
+
+function generate_biblio_from_pmid($pmid){
+	if(module_exists('biblio_pm')){
+		if (strlen($pmid)) {
+			$node = biblio_pm_fetch_pmid($pmid);
+			if(!empty($node)){
+				$dup = false;
+				if(biblio_crossref_check_doi($node->biblio_doi)){
+					$dup =biblio_crossref_check_doi($node->biblio_doi);
+				}else if(biblio_pm_check_pmid($node->biblio_pubmed_id)){
+					$dup = biblio_pm_check_pmid($node->biblio_pubmed_id);
+				}
+				if (!$dup) {
+					$node->comment = 0;
+					$node = node_submit($node);
+					node_save($node);
+					return $node->nid; //node id of newly created node
+				} else {
+					return $dup; //node id of already existing node
+				}
+			}
+		}
+	}
+}
+
+function generate_biblio_from_doi($string){
+	if(module_exists('biblio_crossref')){
+		global $user;
+  		$node = array();
+		if (strlen($doi = $string)) {
+			if (($doi_start = strpos($doi, '10.')) !== FALSE) {
+				$crossref_pid = variable_get('biblio_crossref_pid', '');
+				$user_pid = (isset($user->data['biblio_crossref_pid']) && !empty($user->data['biblio_crossref_pid'])) ? $user->data['biblio_crossref_pid'] : '';
+		        if (variable_get('biblio_show_crossref_profile_form', '1') && !empty($user_pid)) {
+		          $crossref_pid = $user_pid;
+		        }
+
+		        if(!empty($crossref_pid)){
+		        	module_load_include('php', 'biblio_crossref', 'biblio.crossref.client');
+			        $client = new BiblioCrossRefClient($doi, $crossref_pid);
+			        $node = $client->fetch();
+			        if(!empty($node)){
+			        	if (!($dup = biblio_crossref_check_doi($doi))) {
+			        		$node->comment = 0;
+							$node = node_submit($node);
+							node_save($node);
+							return $node->nid; //node id of newly created node
+			        	}else{
+			        		return $dup; //node id of already existing node
+			        	}	        	
+			        }
+		        }
+			}
+		}			
+	}
+}
+
+function generate_biblio_from_other($string){	
+	global $user;
+	$node = new stdClass();
+	$node->title = $string;
+	$node->type = 'biblio';
+	node_object_prepare($node);
+	$node->language = LANGUAGE_NONE;
+	$node->uid = $user->uid;
+	$node->status = 1;
+	$node->promote = 0;
+	$node->comment = 1;
+	$node->biblio_type = "102"; //journal article
+	$node->biblio_year = "Submitted"; //default value for years
+	$node->biblio_other_number = $string;
+	$node = node_submit($node);
+	node_save($node);
+	return $node->nid;
+}
+
+function gaf_process_finished($success, $results, $operations) {
+  //Let the user know we have finished!
+  print t('Finished importing!');
+}
+
+//gene batch processes
+
+//Inserts aliases from the alias file into a temp table in order to build the synonyms
+function insert_gene_aliases($chunk2, &$context){
+	foreach($chunk2 as $data){
+		if($data['locus_name']==''||$data['symbol']==''){
+			echo'<pre>';var_dump($data);exit();
+		}
+		db_insert('tmptable')
+		->fields(array(
+			'gene_stable_id' 	=> $data['locus_name'],
+			'gene_symbol'		=> $data['symbol'],
+			'gene_name'			=> $data['full_name']
+			))
+		->execute();
+	}
+}
+
+//Main callback to import gene data from file.
+function import_gene_data_to_node($chunk1, $species_nid, $source_name, &$context){
+	foreach($chunk1 as $data){
+		//results is an array that holds each match from alias file
+		$results = db_select('tmptable', 'tmp')
+			->fields('tmp')
+			->condition('gene_stable_id', $data['Gene stable ID'],'=')
+			->execute()
+			->fetchAll();
+		$known = array();
+	    $results = array_filter($results, function ($val) use (&$known) {
+	        $unique = !in_array($val->name, $known);
+			$known[] = $val->name;
+			return $unique;
+	    });
+		if(empty($results)){
+			$gene_name = 'Known Gene '.$data['Gene stable ID'];
+			$gene_symbol = $data['Gene stable ID'];
+		} else {
+			$gene_name = $results[0]->gene_name;
+			$gene_symbol = $results[0]->gene_symbol;
+		}
+		array_shift($results);
+		//$results is now the array containing all remaining synonyms - need to check if empty
+
+		global $user; 
+		$node = new stdClass();
+		$node->title = $gene_symbol.' '.$gene_name;
+		$node->type = "gene";
+		node_object_prepare($node);
+		$node->language = LANGUAGE_NONE;
+		$node->uid = $user->uid; 
+		$node->status = 1;
+		$node->promote = 0;
+		$node->comment = 1;
+
+		//description
+		$node->body[$node->language][0]['value'] = $data['Gene description'];
+		$node->body[$node->language][0]['summary'] = text_summary($data['Gene description']);
+		$node->body[$node->language][0]['format'] = 'full_html';
+		//accession
+		$node->field_accession[$node->language][0]['value'] = 'P'.format_accession();
+		//symbol
+		$node->field_gene_symbol[$node->language][0]['value'] = $gene_symbol;
+		//name
+		$node->field_gene_name[$node->language][0]['value'] = $gene_name;
+		//synonyms - remember the first match of results was removed from the array
+		if(count($results)){
+			$syns_arr = array();
+			foreach($results as $results){
+				$syns_arr[] = $results->gene_symbol;
+				$syns_arr[] = $results->gene_name;
+			}
+			for($x=0;$x<count($syns_arr);$x++){
+				$node->field_synonyms[$node->language][$x]['value'] = $syns_arr[$x];
+			}
+		}
+		//gene ID
+		$node->field_gene_id[$node->language][0]['value'] = $data['Gene stable ID'];
+		//Chromosome fields
+		$node->field_chromosome_no[$node->language][0]['value'] = $data['Chromosome'];
+		$node->field_chromosome_start[$node->language][0]['value'] = (int)$data['Gene start (bp)'];
+		$node->field_chromosome_stop[$node->language][0]['value'] = (int)$data['Gene end (bp)'];
+		//species - will need to make this dynamic later, should be easy
+		//species nid passed as variable
+		$node->field_ref_species[$node->language][0]['target_id'] = $species_nid;
+		//gene type
+		$term_array = taxonomy_get_term_by_name($data['Gene type']);
+		if(count($term_array) !== 0){
+			//term already exists
+			$term = reset($term_array);
+			$node->field_gene_type[$node->language][0]['tid'] = $term->tid; //term id of the term which is in taxonomy
+		} else {
+			//term doesn't exist, need to create it
+			$taxon_tree = taxonomy_vocabulary_machine_name_load('gene_type');
+			$taxon_vid = $taxon_tree->vid;
+			$term = new stdClass();
+			$term->name = $data['Gene type'];
+			$term->vid = $taxon_vid;
+			taxonomy_term_save($term);
+			$node->field_gene_type[$node->language][0]['tid'] = $term->tid; //term id of the term which is in taxonomy
+		}
+
+		//data source
+		$term_array = taxonomy_get_term_by_name($source_name);
+		if(count($term_array) !== 0){
+			//term already exists
+			$term = reset($term_array);
+			//exit(($term->tid));
+			//term id of the term which is in taxonomy
+		} else {
+			//term doesn't exist, need to create it
+			$taxon_tree = taxonomy_vocabulary_machine_name_load('sources');
+			$taxon_vid = $taxon_tree->vid;
+			$term = new stdClass();
+			$term->name = 'Gramene';
+			$term->vid = $taxon_vid;
+			taxonomy_term_save($term);
+			//term id of the term which is in taxonomy
+		}
+
+		$field_collection_item = entity_create('field_collection_item', array('field_name' => 'field_data_source'));
+		$field_collection_item->setHostEntity('node', $node);
+		$field_collection_item->field_source_name[$node->language][0]['tid'] = $term->tid;
+		$field_collection_item->field_object_id[$node->language][0]['value'] = $data['Gene stable ID'];
+		$field_collection_item->save();
+		$node->field_data_source[$node->language][0]['value'] = $field_collection_item->item_id;
+		$node = node_submit($node);
+		node_save($node);
+	}
+}
+
+function format_accession(){
+	$results = db_select('accession', 'acc')
+			->fields('acc')
+			->execute()
+			->fetchAssoc();
+	$accession_int = $results['accession'];
+	$accession_number = (string)$accession_int;
+	$acc_len = strlen($accession_number);
+	for($acc_len;$acc_len < 12; $acc_len++){
+		$accession_number = '0'.$accession_number;
+	}
+	$accession_int++;
+	$query = db_update('accession')
+		->fields(array(
+			'accession'			=> $accession_int))
+		->execute();
+
+	$results = db_select('accession', 'acc')
+			->fields('acc')
+			->execute()
+			->fetchAssoc();
+	return $accession_number;
+}
+function format_annotation_accession(){
+	$results = db_select('annotation_accession', 'ann_acc')
+			->fields('ann_acc')
+			->execute()
+			->fetchAssoc();
+	$accession_int = $results['accession'];
+	$accession_number = (string)$accession_int;
+	$acc_len = strlen($accession_number);
+	for($acc_len;$acc_len < 12; $acc_len++){
+		$accession_number = '0'.$accession_number;
+	}
+	$accession_int++;
+	$query = db_update('annotation_accession')
+		->fields(array(
+			'accession'			=> $accession_int))
+		->execute();
+
+	$results = db_select('annotation_accession', 'ann_acc')
+			->fields('ann_acc')
+			->execute()
+			->fetchAssoc();
+	return $accession_number;
+}
+
+function biomart_process_finished($success, $results, $operations) {
+  //Let the user know we have finished!
+  print t('Finished importing!');
+}
+
+function validate_database_reference($db_xref_string){
+
+}
+
+function tabbed_file_to_array($content){
+    $array = explode("\r\n",$content);
+    $fields = array_shift($array);
+    $fields = explode("\t",$fields);
+    $ret_arr = array();
+    //see https://stackoverflow.com/questions/20151517/php-chars-added-when-exploding-on-newline
+
+    foreach($array as $gene){
+    	$gene = explode("\t",$gene);
+    	$tmp_arr = array();
+    	for ($x = 0; $x < count($fields); $x++) {
+		    $tmp_arr[$fields[$x]] = $gene[$x];
+		}
+		$ret_arr[] = $tmp_arr;
+    }
+
+ 
+    return $ret_arr;
+}
+
+function tabbed_file_to_array_alt($content){
+    $array = explode("\n",$content);
+    $fields = array_shift($array);
+    $fields = explode("\t",$fields);
+    $ret_arr = array();
+    //see https://stackoverflow.com/questions/20151517/php-chars-added-when-exploding-on-newline
+
+    foreach($array as $gene){
+    	$gene = explode("\t",$gene);
+    	$tmp_arr = array();
+    	for ($x = 0; $x < count($fields); $x++) {
+		    $tmp_arr[$fields[$x]] = $gene[$x];
+		}
+		$ret_arr[] = $tmp_arr;
+    }
+
+ 
+    return $ret_arr;
+}
+
+function autocomplete_genes($string){
+	if(strlen($string) > 6){
+		$matches = array();
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type', 'node')
+			->entityCondition('bundle','gene')
+			->propertyCondition('type',array('gene'))
+			->fieldCondition('field_gene_id', 'value', '%'.$string.'%', 'LIKE');
+		$results = $query->execute();
+		foreach($results['node'] as $result){
+			$node = node_load($result->nid);
+			$matches[$node->title] = check_plain($node->title);
+		}
+		drupal_json_output($matches);
+	}
+}
+
+function autocomplete_aspect($string){
+	$vocab = taxonomy_vocabulary_machine_name_load('evidence_code');
+	$matches = array();
+	$result = db_select('taxonomy_term_data', 't')
+	    -> fields('t', array('tid', 'name'))
+	    -> condition('vid', $vocab->vid, '=')
+	    -> condition('name', $string.'%%', 'LIKE')
+		-> range(0, 10)
+	    -> execute();
+	foreach ($result as $term) {
+	  $matches[$term->name] = check_plain($term->name);
+	}
+	drupal_json_output($matches);
+}
+
+function autocomplete_evidence_code($string){
+	$vocab = taxonomy_vocabulary_machine_name_load('aspect');
+	$matches = array();
+	$result = db_select('taxonomy_term_data', 't')
+	    -> fields('t', array('tid', 'name'))
+	    -> condition('vid', $vocab->vid, '=')
+	    -> condition('name', $string.'%%', 'LIKE')
+		-> range(0, 10)
+	    -> execute();
+	foreach ($result as $term) {
+	  $matches[$term->name] = check_plain($term->name);
+	}
+	drupal_json_output($matches);
+}
+
+function autocomplete_sources($string){
+	$vocab = taxonomy_vocabulary_machine_name_load('sources');
+	$matches = array();
+	$result = db_select('taxonomy_term_data', 't')
+	    -> fields('t', array('tid', 'name'))
+	    -> condition('vid', $vocab->vid, '=')
+	    -> condition('name', $string.'%%', 'LIKE')
+		-> range(0, 10)
+	    -> execute();
+	foreach ($result as $term) {
+	  $matches[$term->name] = check_plain($term->name);
+	}
+	drupal_json_output($matches);
+}
+
+function autocomplete_species($string){
+	$matches = array();
+	$term_array = taxonomy_get_term_by_name('species');
+	$term_array_2 = taxonomy_get_term_by_name('subspecies');
+	$term = reset($term_array);
+	$term_2 = reset($term_array_2);
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type', 'node')
+		->entityCondition('bundle','taxon')
+		->propertyCondition('type',array('taxon'))
+		->propertyCondition('title', '%'.$string.'%','LIKE')
+		->fieldCondition('field_taxon_rank','tid',array($term->tid, $term_2->tid));
+	$results = $query->execute();
+	foreach($results['node'] as $result){
+		$node = node_load($result->nid);
+		$matches[$node->title] = check_plain($node->title);
+	}
+	drupal_json_output($matches);
+}
+
+function autocomplete_ontology_term($string){
+	//use http://browser.planteome.org/api/autocomplete/ontology?q=STRING
+	$matches = array();
+	$html_json = htmlspecialchars(curl_get_contents("http://browser.planteome.org/api/autocomplete/ontology?q=".url_encode_2($string)));
+	$tmp = html_entity_decode($html_json);
+	$json_obj = json_decode($tmp);
+	foreach($json_obj->data as $match){
+		// use ->id to pass GOID
+		$matches[$match->id] = check_plain($match->annotation_class_label);
+	}
+	drupal_json_output($matches);
+}
+
+function autocomplete_ontology_term_extended($string){
+	//use http://browser.planteome.org/api/autocomplete/ontology?q=STRING
+	$matches = array();
+	$html_json = htmlspecialchars(curl_get_contents("http://browser.planteome.org/api/autocomplete/ontology?q=".url_encode_2($string)));
+	$tmp = html_entity_decode($html_json);
+	$json_obj = json_decode($tmp);
+	foreach($json_obj->data as $match){
+		// use ->id to pass GOID
+		$matches[$match->id] = check_plain($match->annotation_class_label.' ('.$match->id.')');
+	}
+	drupal_json_output($matches);
+}
+
+function get_ontology_term_from_id($id_string) {
+	$html_json = htmlspecialchars(curl_get_contents("http://browser.planteome.org/api/autocomplete/ontology?q=".url_encode_2($id_string)));
+	$tmp = html_entity_decode($html_json);
+	$json_obj = json_decode($tmp);
+	$output = $id_string;
+	if(is_object($json_obj) && count($json_obj->data)){
+		foreach($json_obj->data as $data){
+			if($data->id == $id_string){
+				$output = $data->annotation_class_label;
+			}
+		}
+	}
+	return $output;
+}
+
+function get_ontology_id_from_term($term_string) {
+	// if($id_string == '(R,R)-butanediol dehydrogenase activity'){
+		// return 'same';
+		// echo'<pre>';var_dump(url_encode_2($id_string));exit;
+	// }
+	$html_json = htmlspecialchars(curl_get_contents("http://browser.planteome.org/api/autocomplete/ontology?q=".url_encode_2($term_string)));
+	$tmp = html_entity_decode($html_json);
+	$json_obj = json_decode($tmp);
+	$output = $term_string;
+	if(is_object($json_obj) && count($json_obj->data)){
+		foreach($json_obj->data as $data){
+			if($data->annotation_class_label == $term_string){
+				$output = $data->id;
+			}
+		}
+	}
+	return $output;
+}
+
+
+ /**
+ * get_children($taxon_id, $remaining_entities).
+ *
+ * recursively builds the full taxonomic tree starting at a given NCBITaxon_ID (for the entire tree in the OWL file, use taxon_id = 1)
+ *
+ * @param taxon_id 
+ *   The current NCBITaxon ID
+ * @param remaining_entities 
+ *   the one-level array of all entities in the OWL file.
+ *   Could be optimized by unsetting each element as its added to the true tree, but unnecessary for our dataset.
+ */
+function get_children($taxon_id, $remaining_entities){
+	foreach ($remaining_entities as $index => $entity) {
+		if($entity['id'] == $taxon_id){
+			$ret_ent = $entity;
+			foreach($remaining_entities as $index2 => $entity2){
+				if($entity2['parent'] == $ret_ent['id']){
+					$ret_ent['children'][] = get_children($entity2['id'],$remaining_entities);
+				}
+			}
+			return $ret_ent;
+		}
+	}
+}
+
+ /**
+ * import_owl_data($entity).
+ *
+ * Called on the entities built in the parse_owl and get_children functions. Takes an entity array and creates a taxonomy node
+ *
+ * @param $entity 
+ *   An array with the following indexes:
+ *		[id]				=> int
+ *		[rank]				=> string
+ *		[label]				=> string
+ *		[parent]			=> int
+ *		[synonyms][related] => string array
+ *		[synonyms][exact]	=> string array
+ */
+function import_owl_data($entity){
+	/*@todo We need to check if a node is already added with a NCBI taxon id */
+
+	$query = new EntityFieldQuery();
+	$query->entityCondition('entity_type', 'node')
+		->entityCondition('bundle','taxon')
+		->propertyCondition('type',array('taxon'))
+		->fieldCondition('field_taxon_ncbi_id','value',$entity['id']);
+	$results = $query->execute();
+	if(!empty($results)){
+		//node with this NCBITaxonID already exists
+		return;
+	}
+
+	global $user; 
+	$node = new stdClass();
+	$node->title = $entity['label'];
+	$node->type = "taxon";
+	node_object_prepare($node);
+	$node->language = LANGUAGE_NONE;
+	$node->uid = $user->uid; 
+	$node->status = 1;
+	$node->promote = 0;
+	$node->comment = 1;
+	$node->field_taxon_ncbi_id['und'][0]['value'] = $entity['id'];
+	$term_array = taxonomy_get_term_by_name($entity['rank']);
+	error_log(print_r($term_array,true));
+	if(count($term_array) !== 0){
+		//term already exists
+		$term = reset($term_array);
+		$node->field_taxon_rank['und'][0]['tid'] = $term->tid;
+		//term id of the term which is in taxonomy
+	} else {
+		//term doesn't exist, need to create it
+		$taxon_tree = taxonomy_vocabulary_machine_name_load('taxon');
+		$taxon_vid = $taxon_tree->vid;
+		$term = new stdClass();
+		$term->name = $entity['rank'];
+		$term->vid = $taxon_vid;
+		taxonomy_term_save($term);
+		$node->field_taxon_rank_tid['und'][0]['tid'] = $term->tid;
+		//term id of the term which is in taxonomy
+	}
+	//need to iterate over all entities and get parent entity id based on taxonid
+	//if entity id is 1, we're at the root, so skip adding a parent for that
+
+	if($entity['id'] != 1){
+		//get the entity which is the parent
+		$query = new EntityFieldQuery();
+		$query->entityCondition('entity_type','node')
+			->entityCondition('bundle','taxon')
+			->propertyCondition('type',array('taxon'))
+			->fieldCondition('field_taxon_ncbi_id','value',$entity['parent']);
+		$results = $query->execute();
+		$parent_nid = array_keys($results['node'])[0];
+
+		if(!empty($results)){
+			//found parent
+			$node->field_taxon_parent['und'][0] = array(
+    		'target_id' => $parent_nid,
+    		'target_type' => 'node');
+		}
+	}
+
+	if($entity['synonyms']['related'][0] != 'NO RELATED'){
+		foreach($entity['synonyms']['related'] as $synonym){
+			//handle
+			$node->field_taxon_related_synonyms['und'][]['value'] = $synonym;
+		}
+	}
+	if($entity['synonyms']['exact'][0] != 'NO EXACT'){
+		foreach($entity['synonyms']['exact'] as $synonym){
+			//handle
+			$node->field_taxon_exact_synonyms['und'][]['value'] = $synonym;
+		}
+	}
+
+
+		error_log($node->title);
+		error_log($node->type);
+		error_log($node->field_taxon_ncbi_id['und'][0]['value']);
+		error_log($node->field_taxon_rank['und'][0]['tid']);
+		error_log($node->field_taxon_rank_tid['und'][0]['tid']);
+		error_log($term->tid);
+		error_log($node->field_taxon_related_synonyms['und'][0]['value']);
+		error_log($node->field_taxon_exact_synonyms['und'][0]['value']);
+		error_log($parent_nid);
+
+	$node = node_submit($node);
+	node_save($node);
+}
+
+/**
+ * Create a taxonomy term and return the tid.
+ */
+function custom_create_taxonomy_term($name, $vid) {
+  $term = new stdClass();
+  $term->name = $name;
+  $term->vid = $vid;
+  taxonomy_term_save($term);
+  return $term->tid;
+}
+
+function iterate($array){
+    import_owl_data($array);
+    if(array_key_exists('children',$array)){
+        foreach($array['children'] as $child){
+            iterate($child);
+        }
+    }
+}
+
+function taxonomy_to_select_array($string) {
+	$vocab = taxonomy_vocabulary_machine_name_load($string);
+	$terms = taxonomy_get_tree($vocab->vid);
+	$output = array();
+	$output[] = '';
+
+  	foreach ($terms as $data) {
+    	$output[$data->tid] = $data->name;
+  	}
+
+  	return $output;
+}
+
+function url_encode_2($string) {
+    $entities = array('%21', '%2A', '%27', '%28', '%29', '%3B', '%3A', '%40', '%26', '%3D', '%2B', '%24', '%2C', '%2F', '%3F', '%25', '%23', '%5B', '%5D');
+    $replacements = array('!', '*', "'", "(", ")", ";", ":", "@", "&", "=", "+", "$", ",", "/", "?", "%", "#", "[", "]");
+    return str_replace($entities, $replacements, urlencode($string));
+}
+
+function get_string_between($string, $start, $end){
+    $string = ' ' . $string;
+    $ini = strpos($string, $start);
+    if ($ini == 0) return '';
+    $ini += strlen($start);
+    $len = strpos($string, $end, $ini) - $ini;
+    return substr($string, $ini, $len);
+}
+
+function curl_get_contents($url){
+    $ch = curl_init();
+
+    curl_setopt($ch, CURLOPT_HEADER, 0);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_URL, $url);
+
+    $data = curl_exec($ch);
+    curl_close($ch);
+
+    return $data;
+}
+
+function cgrb_data_import_form_node_form_alter(&$form, &$form_state, $form_id) {
+  // Find the content type of the node we are editing.
+  $content_type = $form['#node']->type;
+  if ($content_type == 'annotation') {
+    $form['actions']['clone'] = array(
+	  '#type' => 'submit',
+	  '#value' => 'Clone',
+	  '#name' => 'op',
+	  '#submit' => array('clone_annotation'), /* NEED this */
+	);
+  }
+}
+
+function clone_annotation($form, &$form_state) {
+	//echo'<pre>';var_dump(menu_get_object());exit;
+	//not workin, try this one https://www.drupal.org/forum/support/module-development-and-code-questions/2011-02-27/custom-form_stateredirect-is-not
+	$form_state['redirect'] = '/osu-cgrb/website/node/add/annotation?clone_nid='.menu_get_object()->nid;
+	//drupal_goto('osu-cgrb/website/node/add/annotation', array('query'=> array('clone_nid'=> ''.menu_get_object()->nid)));
+}
+
+/************ACCESS FUNCTION*************/
+
+function access_function() {
+	global $user;
+	if (in_array('administrator', $user->roles)
+		|| in_array('Contributors', $user->roles)
+		|| in_array('Curators', $user->roles)
+		|| in_array('Moderators', $user->roles)) {
+		return true;
+	} else {
+		return false;
+	}
+}
